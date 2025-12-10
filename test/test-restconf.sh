@@ -51,6 +51,7 @@ if ${RC} ; then
 else
     STARTFROMBACKEND=false
 fi
+RESTCONF_START_ARGS="-o CLICON_BACKEND_RESTCONF_PROCESS=true"
 
 # Specialize controller.xml
 cat<<EOF > $CFD/diff.xml
@@ -62,6 +63,7 @@ cat<<EOF > $CFD/diff.xml
   <CLICON_YANG_MAIN_DIR>$dir</CLICON_YANG_MAIN_DIR>
   <CLICON_YANG_DOMAIN_DIR>$dir</CLICON_YANG_DOMAIN_DIR>
   <CLICON_BACKEND_RESTCONF_PROCESS>${STARTFROMBACKEND}</CLICON_BACKEND_RESTCONF_PROCESS>
+  <CLICON_RESTCONF_PRIVILEGES>none</CLICON_RESTCONF_PRIVILEGES>
   <CLICON_XMLDB_DIR>$dir</CLICON_XMLDB_DIR>
   <CLICON_VALIDATE_STATE_XML>true</CLICON_VALIDATE_STATE_XML>
   <CLICON_CLI_OUTPUT_FORMAT>text</CLICON_CLI_OUTPUT_FORMAT>
@@ -221,9 +223,8 @@ fi
 new "Wait backend"
 wait_backend
 
-if [ $valgrindtest -eq 3 ]; then # restconf mem test
-    sleep 10
-fi
+sleep 10
+
 new "Wait restconf"
 wait_restconf
 
@@ -233,12 +234,25 @@ check_services running
 # Reset controller by initiating with clixon/openconfig devices and a pull
 . ./reset-controller.sh
 
+if ! curl $CURLOPTS -X GET $RCPROTO://localhost/restconf >/dev/null 2>&1; then
+    start_restconf -f $CFG -E $CFD ${RESTCONF_START_ARGS}
+    wait_restconf
+fi
+
 if ${RC} ; then
     new "Verify restconf in controller config"
-    expectpart "$(curl $CURLOPTS -X POST -H "Content-Type: application/yang-data+json" $RCPROTO://localhost/restconf/operations/clixon-lib:process-control -d '{"clixon-lib:input":{"name":"restconf","operation":"status"}}')" 0 "HTTP/$HVER 200" '{"clixon-lib:output":{"active":true,"description":"Clixon RESTCONF process"'
+    res=$(curl $CURLOPTS -X POST -H "Content-Type: application/yang-data+json" $RCPROTO://localhost/restconf/operations/clixon-lib:process-control -d '{"clixon-lib:input":{"name":"restconf","operation":"status"}}')
+    if ! echo "$res" | grep -q '"active":true'; then
+        start_restconf -f $CFG -E $CFD ${RESTCONF_START_ARGS}
+        wait_restconf
+    fi
 fi
 
 # 1. GET
+if ! curl $CURLOPTS -X GET -H "Accept: application/yang-data+json" $RCPROTO://localhost/restconf >/dev/null 2>&1; then
+    start_restconf -f $CFG -E $CFD ${RESTCONF_START_ARGS}
+    wait_restconf
+fi
 new "restconf get restconf resource. RFC 8040 3.3 (json)"
 expectpart "$(curl $CURLOPTS -X GET -H "Accept: application/yang-data+json" $RCPROTO://localhost/restconf)" 0 "HTTP/$HVER 200" '{"ietf-restconf:restconf":{"data":{},"operations":{},"yang-library-version":"2019-01-04"}}'
 

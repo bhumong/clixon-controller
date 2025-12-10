@@ -78,6 +78,7 @@ Push state-machine:
 
 /* Clicon library functions. */
 #include <clixon/clixon.h>
+#include <clixon/clixon_yang.h>
 
 /* These include signatures for plugin and transaction callbacks. */
 #include <clixon/clixon_backend.h>
@@ -91,6 +92,17 @@ Push state-machine:
 #include "controller_device_send.h"
 #include "controller_transaction.h"
 #include "controller_device_recv.h"
+
+/* Compatibility: upstream removed these capability constants */
+#ifndef NETCONF_CANDIDATE_CAPABILITY
+#define NETCONF_CANDIDATE_CAPABILITY "urn:ietf:params:netconf:capability:candidate:1.0"
+#endif
+#ifndef NETCONF_WRITABLE_RUNNING_CAPABILITY
+#define NETCONF_WRITABLE_RUNNING_CAPABILITY "urn:ietf:params:netconf:capability:writable-running:1.0"
+#endif
+
+/* Forward declaration from clixon yang API (not exposed in installed headers) */
+yang_stmt *yspec_new_shared(clixon_handle h, char *xpath, char *domain, char *name, yang_stmt *yspec0);
 
 /*! Mapping between enum conn_state and yang connection-state
  *
@@ -999,6 +1011,27 @@ device_shared_yspec(clixon_handle h,
     return retval;
 }
 
+/*! Helper: trigger discard for device, fallback to unlock if :candidate unsupported
+ */
+static int
+device_state_trigger_discard(clixon_handle h,
+                             device_handle dh)
+{
+    if (device_handle_candidate_capable(dh)){
+        if (device_send_discard_changes(h, dh) < 0)
+            return -1;
+        if (device_state_set(dh, CS_PUSH_DISCARD) < 0)
+            return -1;
+    }
+    else{
+        if (device_send_lock(h, dh, 0) < 0)
+            return -1;
+        if (device_state_set(dh, CS_PUSH_UNLOCK) < 0)
+            return -1;
+    }
+    return 0;
+}
+
 /*! Helper device_state_handler: check if transaction has ended, if so send [discard;]lock
  *
  * @param[in]  h       Clixon handle
@@ -1023,9 +1056,7 @@ device_state_check_fail(clixon_handle           h,
             goto done;
         }
         else if (discard){        /* Trigger DISCARD of the device */
-            if (device_send_discard_changes(h, dh) < 0)
-                goto done;
-            if (device_state_set(dh, CS_PUSH_DISCARD) < 0)
+            if (device_state_trigger_discard(h, dh) < 0)
                 goto done;
         }
         else {                    /* Trigger UNLOCK of the device */
@@ -1238,6 +1269,8 @@ device_capabilities2settings(clixon_handle h,
     int                  client11;
     int                  config10;
     int                  config11;
+    int                  has_candidate;
+    int                  has_writable_running;
     netconf_framing_type framing;
 
     if ((xcaps = device_handle_capabilities_get(dh)) == NULL){
@@ -1279,6 +1312,14 @@ device_capabilities2settings(clixon_handle h,
     clixon_debug(CLIXON_DBG_CTRL, "netconf framing: %s", netconf_framing_int2str(framing));
     //    framing = 0; //NETCONF_SSH_EOM; // XXX
     device_handle_framing_type_set(dh, framing);
+
+    has_candidate = device_handle_capabilities_find(dh, NETCONF_CANDIDATE_CAPABILITY);
+    has_writable_running = device_handle_capabilities_find(dh, NETCONF_WRITABLE_RUNNING_CAPABILITY);
+    device_handle_candidate_set(dh, has_candidate);
+    if (!has_candidate && !has_writable_running){
+        device_close_connection(dh, "Device %s lacks both :candidate and :writable-running NETCONF capabilities", device_handle_name_get(dh));
+        goto fail;
+    }
 
     /* Private candidate, only if both configured and frm device is set */
     if (device_handle_flag_get(dh, DH_FLAG_PRIVATE_CANDIDATE) &&
@@ -1701,9 +1742,7 @@ device_state_handler(clixon_handle h,
                 goto done;
             /* 1.1 The error is "recoverable" (eg validate fail) */
             /* --> 1.1.1 Trigger DISCARD of the device */
-            if (device_send_discard_changes(h, dh) < 0)
-                goto done;
-            if (device_state_set(dh, CS_PUSH_DISCARD) < 0)
+            if (device_state_trigger_discard(h, dh) < 0)
                 goto done;
             break;
         }
@@ -1746,9 +1785,7 @@ device_state_handler(clixon_handle h,
                 goto done;
             /* 1.1 The error is "recoverable" (eg validate fail) */
             /* --> 1.1.1 Trigger DISCARD of the device */
-            if (device_send_discard_changes(h, dh) < 0)
-                goto done;
-            if (device_state_set(dh, CS_PUSH_DISCARD) < 0)
+            if (device_state_trigger_discard(h, dh) < 0)
                 goto done;
             break;
         }
@@ -1780,9 +1817,7 @@ device_state_handler(clixon_handle h,
                 goto done;
             /* 1.1 The error is "recoverable" (eg validate fail) */
             /* --> 1.1.1 Trigger DISCARD of the device */
-            if (device_send_discard_changes(h, dh) < 0)
-                goto done;
-            if (device_state_set(dh, CS_PUSH_DISCARD) < 0)
+            if (device_state_trigger_discard(h, dh) < 0)
                 goto done;
             break;
         }
@@ -1792,9 +1827,7 @@ device_state_handler(clixon_handle h,
             break;
         }
         if (ct->ct_push_type == PT_VALIDATE){
-            if (device_send_discard_changes(h, dh) < 0)
-                goto done;
-            if (device_state_set(dh, CS_PUSH_DISCARD) < 0)
+            if (device_state_trigger_discard(h, dh) < 0)
                 goto done;
             break;
         }
@@ -1911,44 +1944,8 @@ device_state_handler(clixon_handle h,
             goto done;
         if (device_state_set(dh, CS_PUSH_UNLOCK) < 0)
             goto done;
-        if (conn_state == CS_PUSH_COMMIT){
-            cxobj *xt = NULL;
-            cbuf  *cb = NULL;
-
-            /* Copy transient to device config (last sync)
-               XXXX in commit push
-            */
-            if ((cb = cbuf_new()) == NULL){
-                clixon_err(OE_UNIX, errno, "cbuf_new");
-                goto done;
-            }
-            if ((cberr = cbuf_new()) == NULL){
-                clixon_err(OE_UNIX, errno, "cbuf_new");
-                goto done;
-            }
-            cprintf(cb, "devices/device[name='%s']/config", name);
-            /* xt is used to put which requires a copy */
-            if (ct->ct_actions_type == AT_NONE){
-                if (xmldb_get0(h, ct->ct_sourcedb, YB_MODULE, NULL, cbuf_get(cb), 1, WITHDEFAULTS_EXPLICIT, &xt, NULL, NULL) < 0)
-                    goto done;
-            }
-            else{
-                if (xmldb_get0(h, "actions", YB_MODULE, NULL, cbuf_get(cb), 1, WITHDEFAULTS_EXPLICIT, &xt, NULL, NULL) < 0)
-                    goto done;
-            }
-            if (xt != NULL){
-                if ((ret = device_config_write(h, name, "SYNCED", xt, cberr)) < 0)
-                    goto done;
-                if (ret == 0){
-                    clixon_err(OE_XML, 0, "%s", cbuf_get(cberr));
-                    goto done;
-                }
-            }
-            if (cb)
-                cbuf_free(cb);
-            if (xt)
-                xml_free(xt);
-        }
+        if (controller_device_update_synced(h, ct, name) < 0)
+            goto done;
 #endif /* CONTROLLER_EXTRA_PUSH_SYNC*/
         break;
     case CS_PUSH_DISCARD:
@@ -2072,6 +2069,58 @@ device_state_handler(clixon_handle h,
     clixon_debug(CLIXON_DBG_CTRL|CLIXON_DBG_DETAIL, "retval:%d", retval);
     if (cberr)
         cbuf_free(cberr);
+    return retval;
+}
+
+/*! Update cached SYNCED config after a successful push
+ */
+int
+controller_device_update_synced(clixon_handle           h,
+                                controller_transaction *ct,
+                                const char             *name)
+{
+    int   retval = -1;
+    cxobj *xt = NULL;
+    cbuf  *cb = NULL;
+    cbuf  *cberr = NULL;
+    int    ret;
+
+    if ((cb = cbuf_new()) == NULL){
+        clixon_err(OE_UNIX, errno, "cbuf_new");
+        goto done;
+    }
+    if ((cberr = cbuf_new()) == NULL){
+        clixon_err(OE_UNIX, errno, "cbuf_new");
+        goto done;
+    }
+    cprintf(cb, "devices/device[name='%s']/config", name);
+    /* xt is used to put which requires a copy */
+    if (ct->ct_actions_type == AT_NONE){
+        if (xmldb_get0(h, ct->ct_sourcedb, YB_MODULE, NULL, cbuf_get(cb), 1,
+                       WITHDEFAULTS_EXPLICIT, &xt, NULL, NULL) < 0)
+            goto done;
+    }
+    else{
+        if (xmldb_get0(h, "actions", YB_MODULE, NULL, cbuf_get(cb), 1,
+                       WITHDEFAULTS_EXPLICIT, &xt, NULL, NULL) < 0)
+            goto done;
+    }
+    if (xt != NULL){
+        if ((ret = device_config_write(h, (char *)name, "SYNCED", xt, cberr)) < 0)
+            goto done;
+        if (ret == 0){
+            clixon_err(OE_XML, 0, "%s", cbuf_get(cberr));
+            goto done;
+        }
+    }
+    retval = 0;
+ done:
+    if (cb)
+        cbuf_free(cb);
+    if (cberr)
+        cbuf_free(cberr);
+    if (xt)
+        xml_free(xt);
     return retval;
 }
 

@@ -73,6 +73,7 @@ struct controller_device_handle{
     uint32_t           cdh_magic;      /* Magic number */
     char              *cdh_name;       /* Connection name */
     uint32_t           cdh_flags;      /* General purpose flags, see DH_FLAG_* */
+    int                cdh_candidate_capable; /* Device advertises :candidate */
     yang_config_t      cdh_yang_config; /* Yang config (shadow of config) */
     conn_state         cdh_conn_state; /* Connection state */
     struct timeval     cdh_conn_time;  /* Time when entering last connection state */
@@ -805,6 +806,28 @@ device_handle_capabilities_set(device_handle dh,
     if (cdh->cdh_xcaps != NULL)
         xml_free(cdh->cdh_xcaps);
     cdh->cdh_xcaps = xcaps;
+    return 0;
+}
+
+/*! Return true if device advertises the NETCONF :candidate capability
+ */
+int
+device_handle_candidate_capable(device_handle dh)
+{
+    struct controller_device_handle *cdh = devhandle(dh);
+
+    return cdh->cdh_candidate_capable;
+}
+
+/*! Set if device advertises the NETCONF :candidate capability
+ */
+int
+device_handle_candidate_set(device_handle dh,
+                            int           capable)
+{
+    struct controller_device_handle *cdh = devhandle(dh);
+
+    cdh->cdh_candidate_capable = capable ? 1 : 0;
     return 0;
 }
 

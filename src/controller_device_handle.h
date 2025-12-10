@@ -97,6 +97,8 @@ int    device_handle_framing_type_set(device_handle dh, netconf_framing_type ft)
 cxobj *device_handle_capabilities_get(device_handle dh);
 int    device_handle_capabilities_set(device_handle dh, cxobj *xcaps);
 int    device_handle_capabilities_find(clixon_handle ch, const char *name);
+int    device_handle_candidate_capable(device_handle dh);
+int    device_handle_candidate_set(device_handle dh, int capable);
 cxobj *device_handle_yang_lib_get(device_handle dh);
 int    device_handle_yang_lib_set(device_handle dh, cxobj *xylib);
 int    device_handle_yang_lib_append(device_handle dh, cxobj *xylib);

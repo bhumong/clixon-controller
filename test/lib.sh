@@ -476,11 +476,17 @@ function restconf_config()
         cacerts $cakey $cacert
         servercerts $cakey $cacert $srvkey $srvcert
     fi
+    fcgi_socket="/www-data/fastcgi_restconf.sock"
+    fcgi_dir=$(dirname "${fcgi_socket}")
+    if [ ! -d "${fcgi_dir}" ]; then
+        mkdir -p "${fcgi_dir}"
+    fi
+
     echo -n "<restconf xmlns=\"http://clicon.org/restconf\">"
     echo -n "<enable>true</enable>"
     echo -n "<debug>$DEBUG</debug>"
     echo -n "<timeout>$TIMEOUT</timeout>"
-    echo -n "<fcgi-socket>/www-data/fastcgi_restconf.sock</fcgi-socket>"
+    echo -n "<fcgi-socket>${fcgi_socket}</fcgi-socket>"
     if ${HTTPDATA}; then
         echo -n "<enable-http-data>true</enable-http-data>"
     fi

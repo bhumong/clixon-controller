@@ -61,6 +61,9 @@
  */
 typedef void *device_handle; // duplicated from controller_device_handle.h
 
+struct controller_transaction_t;
+typedef struct controller_transaction_t controller_transaction;
+
 /*! State of connection
  *
  * Only closed and open are "stable", the others are transient and timeout to closed
@@ -133,6 +136,9 @@ int          device_config_read_cache(clixon_handle h, char *devname, char *conf
 int          device_config_write(clixon_handle h, char *name, char *config_type, cxobj *xdata, cbuf *cbret);
 int          device_state_handler(clixon_handle h, device_handle ch, int s, cxobj *xmsg);
 int          devices_statedata(clixon_handle h, cvec *nsc, char *xpath, cxobj *xstate);
+int          controller_device_update_synced(clixon_handle h,
+                                             controller_transaction *ct,
+                                             const char             *name);
 
 #ifdef __cplusplus
 }

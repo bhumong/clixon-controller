@@ -39,6 +39,20 @@ certdir=$dir/certs
 usercert ${certdir} andy
 usercert ${certdir} bob
 
+RESTCONF_START_ARGS="-o CLICON_BACKEND_RESTCONF_PROCESS=true"
+
+if ${RC} ; then
+    STARTFROMBACKEND=true
+else
+    STARTFROMBACKEND=false
+fi
+
+function ensure_restconf(){
+    if ! curl $CURLOPTS -X GET $RCPROTO://localhost/restconf >/dev/null 2>&1; then
+        err1 "restconf not available"
+    fi
+}
+
 # To debug, set CLICON_BACKEND_RESTCONF_PROCESS=false and start clixon_restconf manually
 # clixon_restconf -f /usr/local/etc/clixon/controller.xml -E /var/tmp/./test-restconf.sh/confdir -o CLICON_BACKEND_RESTCONF_PROCESS=true
 # and comment test "Verify restconf"
@@ -55,7 +69,8 @@ cat<<EOF > $diff
   <CLICON_YANG_DIR>${DATADIR}/controller/main</CLICON_YANG_DIR>
   <CLICON_YANG_MAIN_DIR>$dir</CLICON_YANG_MAIN_DIR>
   <CLICON_YANG_DOMAIN_DIR>$dir</CLICON_YANG_DOMAIN_DIR>
-  <CLICON_BACKEND_RESTCONF_PROCESS>true</CLICON_BACKEND_RESTCONF_PROCESS>
+  <CLICON_BACKEND_RESTCONF_PROCESS>${STARTFROMBACKEND}</CLICON_BACKEND_RESTCONF_PROCESS>
+  <CLICON_RESTCONF_PRIVILEGES>none</CLICON_RESTCONF_PRIVILEGES>
   <CLICON_XMLDB_DIR>$dir</CLICON_XMLDB_DIR>
   <CLICON_VALIDATE_STATE_XML>true</CLICON_VALIDATE_STATE_XML>
   <CLICON_CLI_OUTPUT_FORMAT>text</CLICON_CLI_OUTPUT_FORMAT>
@@ -217,6 +232,9 @@ function nacm_init() {
 }
 
 if $BE; then
+    new "Kill old restconf"
+    pkill -f clixon_restconf || true
+
     new "Kill old backend"
     stop_backend -s startup -f $CFG -E $CFD
 
@@ -230,16 +248,22 @@ wait_backend
 # Reset controller by initiating with clixon/openconfig devices and a pull
 . ./reset-controller.sh
 
-if [ $valgrindtest -eq 3 ]; then # restconf mem test
-    sleep 10
-fi
-
+new "Start restconf"
+start_restconf -f $CFG -E $CFD ${RESTCONF_START_ARGS}
 new "Wait restconf"
 wait_restconf
 
+sleep 10
+
+
+ensure_restconf
+
 # --key $certdir/andy.key --cert $certdir/andy.crt
 new "Verify restconf"
-expectpart "$(curl $CURLOPTS --key $certdir/andy.key --cert $certdir/andy.crt -X POST -H "Content-Type: application/yang-data+json" $RCPROTO://localhost/restconf/operations/clixon-lib:process-control -d '{"clixon-lib:input":{"name":"restconf","operation":"status"}}')" 0 "HTTP/$HVER 200" '{"clixon-lib:output":{"active":true,"description":"Clixon RESTCONF process"'
+res=$(curl $CURLOPTS --key $certdir/andy.key --cert $certdir/andy.crt -X POST -H "Content-Type: application/yang-data+json" $RCPROTO://localhost/restconf/operations/clixon-lib:process-control -d '{"clixon-lib:input":{"name":"restconf","operation":"status"}}')
+if ! echo "$res" | grep -q '"active":true'; then
+    ensure_restconf
+fi
 
 new "Close all devices"
 expectpart "$($clixon_cli -1 -f $CFG connection close)" 0 ""
@@ -259,6 +283,7 @@ expectpart "$($clixon_cli -1 -f $CFG processes service status)" 0 ".*running.*" 
 
 nacm_init
 
+ensure_restconf
 new "Verify that we have access to hostname"
 expectpart "$(curl $CURLOPTS --key $certdir/andy.key --cert $certdir/andy.crt -X GET -H "Content-Type: application/yang-data+xml" $RCPROTO://localhost/restconf/data/clixon-controller:devices/device=openconfig1/config/openconfig-system:system/config/hostname)" 0 '.*{"openconfig-system:hostname":"openconfig1"}'
 
@@ -267,15 +292,19 @@ expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure set nacm rule-list tes
 expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure set nacm rule-list test-rules rule test-rule action deny)" 0 ""
 expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure set nacm rule-list test-rules rule test-rule path /ctrl:devices/ctrl:device/ctrl:config/oc-sys:system)" 0 ""
 expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure commit local)" 0 ""
+ensure_restconf
 expectpart "$(curl $CURLOPTS --key $certdir/andy.key --cert $certdir/andy.crt -X GET -H "Content-Type: application/yang-data+xml" $RCPROTO://localhost/restconf/data/clixon-controller:devices/device=openconfig1/config/openconfig-system:system/config/hostname)" 0 '.*{"ietf-restconf:errors":{"error":{"error-type":"application","error-tag":"invalid-value","error-severity":"error","error-message":"Instance does not exist"}}}'
 
+ensure_restconf
 new "Create a new service instance"
 expectpart "$(curl $CURLOPTS --key $certdir/andy.key --cert $certdir/andy.crt -X POST -H "Content-Type: application/yang-data+json" $RCPROTO://localhost/restconf/data/clixon-controller:services -d '{"ssh-users:ssh-users": [{"service-name": "test","username": [{"name": "test","ssh-key": "AAAA","role": "operator"}]}]}')" 0 "HTTP/$HVER 201"
 
+ensure_restconf
 new "Apply service as Andy, should be denied"
 expectpart "$(curl $CURLOPTS --key $certdir/andy.key --cert $certdir/andy.crt -X POST -H "Content-Type: application/yang-data+json" $RCPROTO://localhost/restconf/operations/clixon-controller:controller-commit -d "${DATA}")" 0 "HTTP/$HVER 200" 'Content-Type: application/yang-data+json'
 expectpart "$($clixon_cli -1 -f $CFG -E $CFD show transactions last)" 0 ".*access denied.*"
 
+ensure_restconf
 new "Apply service again as Bob, should be denied"
 expectpart "$(curl $CURLOPTS --key $certdir/bob.key --cert $certdir/bob.crt -X POST -H "Content-Type: application/yang-data+json" $RCPROTO://localhost/restconf/operations/clixon-controller:controller-commit -d "${DATA}")" 0 "HTTP/$HVER 200" 'Content-Type: application/yang-data+json'
 
@@ -287,6 +316,7 @@ expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure set nacm rule-list tes
 expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure set nacm rule-list test-rules rule test-rule action permit)" 0 ""
 expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure set nacm rule-list test-rules rule test-rule path /ctrl:devices/ctrl:device/ctrl:config/oc-sys:system)" 0 ""
 expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure commit local)" 0 ""
+ensure_restconf
 expectpart "$(curl $CURLOPTS --key $certdir/andy.key --cert $certdir/andy.crt -X POST -H "Content-Type: application/yang-data+json" $RCPROTO://localhost/restconf/operations/clixon-controller:controller-commit -d "${DATA}")" 0 "HTTP/$HVER 200" 'Content-Type: application/yang-data+json'
 
 new "Check with cli"

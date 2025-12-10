@@ -904,23 +904,46 @@ controller_transaction_wait_trigger(clixon_handle h,
 {
     int           retval = -1;
     device_handle dh = NULL;
+    controller_transaction *ct;
 
+    if ((ct = controller_transaction_find(h, tid)) == NULL){
+        clixon_err(OE_CFG, 0, "Transaction %" PRIu64 " not found", tid);
+        goto done;
+    }
     while ((dh = device_handle_each(h, dh)) != NULL){
         if (device_handle_tid_get(dh) != tid)
             continue;
         if (device_handle_conn_state_get(dh) != CS_PUSH_WAIT)
             continue;
         if (commit){
-            if (device_send_commit(h, dh) < 0)
-                goto done;
-            if (device_state_set(dh, CS_PUSH_COMMIT) < 0)
-                goto done;
+            if (device_handle_candidate_capable(dh)){
+                if (device_send_commit(h, dh) < 0)
+                    goto done;
+                if (device_state_set(dh, CS_PUSH_COMMIT) < 0)
+                    goto done;
+            }
+            else{
+                if (device_send_lock(h, dh, 0) < 0)
+                    goto done;
+                if (device_state_set(dh, CS_PUSH_UNLOCK) < 0)
+                    goto done;
+                if (controller_device_update_synced(h, ct, device_handle_name_get(dh)) < 0)
+                    goto done;
+            }
         }
         else{
-            if (device_send_discard_changes(h, dh) < 0)
-                goto done;
-            if (device_state_set(dh, CS_PUSH_DISCARD) < 0)
-                goto done;
+            if (device_handle_candidate_capable(dh)){
+                if (device_send_discard_changes(h, dh) < 0)
+                    goto done;
+                if (device_state_set(dh, CS_PUSH_DISCARD) < 0)
+                    goto done;
+            }
+            else{
+                if (device_send_lock(h, dh, 0) < 0)
+                    goto done;
+                if (device_state_set(dh, CS_PUSH_UNLOCK) < 0)
+                    goto done;
+            }
         }
     }
     retval = 0;

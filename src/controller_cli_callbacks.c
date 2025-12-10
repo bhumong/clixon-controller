@@ -29,6 +29,7 @@
 #include <string.h>
 #include <errno.h>
 #include <syslog.h>
+#include <ctype.h>
 #include <unistd.h>
 #include <fnmatch.h>
 #include <signal.h> /* matching strings */
@@ -42,11 +43,56 @@
 #include <clixon/clixon.h>
 #include <clixon/clixon_cli.h>
 #include <clixon/cli_generate.h>
+#include <clixon/clixon_autocli_generate.h>
+#include <clixon/clixon_cli_api.h>
 
 /* Controller includes */
 #include "controller.h"
 #include "controller_lib.h"
 #include "controller_cli_callbacks.h"
+
+/*! Convert legacy mountpoint xpath prefixes to module names and append to cbuf
+ *
+ * Older clixon versions passed mountpoint references as raw xpaths using
+ * module prefixes. Newer API paths expect module names.
+ */
+static int
+legacy_mtpoint_prefix2module(cbuf      *cb,
+                             const char *path,
+                             yang_stmt *yspec0)
+{
+    const char *seg = path;
+    const char *colon;
+
+    while ((colon = strchr(seg, ':')) != NULL){
+        const char *pfx_start = colon;
+
+        while (pfx_start > seg &&
+               (isalnum((unsigned char)pfx_start[-1]) ||
+                pfx_start[-1] == '_' || pfx_start[-1] == '-'))
+            pfx_start--;
+        if (pfx_start > seg)
+            cprintf(cb, "%.*s", (int)(pfx_start - seg), seg);
+        if (pfx_start < colon){
+            char      *prefix = NULL;
+            yang_stmt *ymod;
+
+            if ((prefix = strndup(pfx_start, colon - pfx_start)) == NULL){
+                clixon_err(OE_UNIX, errno, "strndup");
+                return -1;
+            }
+            if ((ymod = yang_find_module_by_prefix_yspec(yspec0, prefix)) != NULL)
+                cprintf(cb, "%s", yang_argument_get(ymod));
+            else
+                cprintf(cb, "%s", prefix);
+            free(prefix);
+        }
+        cprintf(cb, ":");
+        seg = colon + 1;
+    }
+    cprintf(cb, "%s", seg);
+    return 0;
+}
 
 /*!
  *
@@ -65,6 +111,9 @@ cli_apipath(clixon_handle h,
 {
     int        retval = -1;
     char      *api_path_fmt01 = NULL;
+    char      *mtdomain = NULL;
+    char      *mtspec = NULL;
+    cbuf      *cb = NULL;
     yang_stmt *yspec0;
 
     if ((yspec0 = clicon_dbspec_yang(h)) == NULL){
@@ -72,11 +121,53 @@ cli_apipath(clixon_handle h,
         goto done;
     }
     if (mtpoint){
-        /* Get and combined api-path01 */
-        if (mtpoint_paths(yspec0, mtpoint, api_path_fmt, &api_path_fmt01) < 0)
+        if (mtpoint_decode(mtpoint, ":", &mtdomain, &mtspec) < 0)
             goto done;
-        if (api_path_fmt2api_path(api_path_fmt01, cvv, yspec0, api_path, cvvi) < 0)
-            goto done;
+        if (mtdomain){
+            /* Get and combined api-path01 */
+            if (mtpoint_paths(h, yspec0, mtdomain, mtspec, api_path_fmt, &api_path_fmt01) < 0)
+                goto done;
+            if (api_path_fmt2api_path(api_path_fmt01, cvv, yspec0, api_path, cvvi) < 0)
+                goto done;
+        }
+        else if (strncmp(mtpoint, "mtpoint:", strlen("mtpoint:")) == 0){
+            if ((cb = cbuf_new()) == NULL){
+                clixon_err(OE_UNIX, errno, "cbuf_new");
+                goto done;
+            }
+            if (legacy_mtpoint_prefix2module(cb, mtpoint + strlen("mtpoint:"), yspec0) < 0)
+                goto done;
+            /* Legacy form uses predicates: /dev[name='foo']/config -> /dev=foo/config */
+            if (strchr(cbuf_get(cb), '[')){
+                char *mapped = cbuf_get(cb);
+                char *br1 = strchr(mapped, '[');
+                char *br2 = br1 ? strchr(br1, ']') : NULL;
+                char *q1 = br1 ? strchr(br1, '\'') : NULL;
+                char *q2 = (q1 && br2 && q1 < br2) ? strchr(q1 + 1, '\'') : NULL;
+
+                if (br1 && br2 && q1 && q2 && q2 < br2){
+                    cbuf *cbtmp;
+
+                    if ((cbtmp = cbuf_new()) == NULL){
+                        clixon_err(OE_UNIX, errno, "cbuf_new");
+                        goto done;
+                    }
+                    cprintf(cbtmp, "%.*s=%%s%s",
+                            (int)(br1 - mapped),
+                            mapped,
+                            br2 + 1);
+                    cbuf_free(cb);
+                    cb = cbtmp;
+                }
+            }
+            cprintf(cb, "%s", api_path_fmt);
+            if (api_path_fmt2api_path(cbuf_get(cb), cvv, yspec0, api_path, cvvi) < 0)
+                goto done;
+        }
+        else{
+            if (api_path_fmt2api_path(api_path_fmt, cvv, yspec0, api_path, cvvi) < 0)
+                goto done;
+        }
     }
     else{
         if (api_path_fmt2api_path(api_path_fmt, cvv, yspec0, api_path, cvvi) < 0)
@@ -86,6 +177,10 @@ cli_apipath(clixon_handle h,
  done:
     if (api_path_fmt01)
         free(api_path_fmt01);
+    free(mtdomain);
+    free(mtspec);
+    if (cb)
+        cbuf_free(cb);
     return retval;
 }
 
@@ -325,7 +420,7 @@ cli_show_auto_devs(clixon_handle h,
         if ((str = cv_string_get(cv)) == NULL)
             continue;
         if (str && strncmp(str, "mtpoint:", strlen("mtpoint:")) == 0){
-            mtpoint = str + strlen("mtpoint:");
+            mtpoint = str;
             devices = strstr(mtpoint, "/ctrl:devices") != NULL;
             argc++;
             continue;
@@ -336,7 +431,7 @@ cli_show_auto_devs(clixon_handle h,
         cprintf(api_path_fmt_cb, "%s", str);
     }
     api_path_fmt = cbuf_get(api_path_fmt_cb);
-    if (mtpoint == NULL)
+    if (mtpoint == NULL || devices == 0)
         devices = strstr(api_path_fmt, "/clixon-controller:devices") != NULL;
     if (cvec_len(argv) <= argc){
         clixon_err(OE_PLUGIN, EINVAL, "Missing: <datastore>");
@@ -473,7 +568,7 @@ cli_show_config_detail(clixon_handle h,
         if ((str = cv_string_get(cv)) == NULL)
             continue;
         if (str && strncmp(str, "mtpoint:", strlen("mtpoint:")) == 0){
-            mtpoint = str + strlen("mtpoint:");
+            mtpoint = str;
             continue;
         }
         if (str[0] != '/')
@@ -2250,17 +2345,30 @@ cli_dbxml_devs(clixon_handle       h,
         cprintf(api_path_fmt_cb, "%s", str);
     }
     api_path_fmt = cbuf_get(api_path_fmt_cb);
-    /* See if 2nd arg is mountpoint and if devices cmd tree is selected */
-    if (cvec_len(argv) > 1 &&
-        (cv = cvec_i(argv, 1)) != NULL &&
-        (str = cv_string_get(cv)) != NULL &&
-        strncmp(str, "mtpoint:", strlen("mtpoint:")) == 0){
-        mtpoint = str + strlen("mtpoint:");
-        devices = strstr(mtpoint, "/ctrl:devices") != NULL;
+    if (getenv("CTRL_DEBUG_MTP")){
+        fprintf(stderr, "cli_dbxml_devs argv_len=%zu api_fmt=%s\n",
+                (size_t)cvec_len(argv), api_path_fmt);
+        for (i=0; i<cvec_len(argv); i++){
+            cv = cvec_i(argv, i);
+            fprintf(stderr, "  argv[%d]=%s\n", i, cv_string_get(cv));
+        }
+        cv = NULL;
+        while ((cv = cvec_each(cvv, cv)) != NULL){
+            fprintf(stderr, "  cvv[%s]=%s\n", cv_name_get(cv), cv_string_get(cv));
+        }
     }
-    else{
+    /* Locate mountpoint argument if present and determine if device subtree */
+    for (i=0; i<cvec_len(argv); i++){
+        cv = cvec_i(argv, i);
+        str = cv_string_get(cv);
+        if (str != NULL && strncmp(str, "mtpoint:", strlen("mtpoint:")) == 0){
+            mtpoint = str;
+            devices = strstr(mtpoint, "/ctrl:devices") != NULL;
+            break;
+        }
+    }
+    if (mtpoint == NULL || devices == 0)
         devices = strstr(api_path_fmt, "/clixon-controller:devices") != NULL;
-    }
     if (devices && (cv = cvec_find(cvv, "name")) != NULL){
         pattern = cv_string_get(cv);
         if (rpc_get_yanglib_mount_match(h, pattern, 0, 0, &xdevs) < 0)

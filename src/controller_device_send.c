@@ -69,6 +69,7 @@ device_send_lock(clixon_handle h,
     int   retval = -1;
     cbuf *cb = NULL;
     int   s;
+    const char *target;
 
     if (lock != 0 && lock != 1){
         clixon_err(OE_UNIX, EINVAL, "lock is not 0 or 1");
@@ -87,7 +88,8 @@ device_send_lock(clixon_handle h,
 #else
     cprintf(cb, "<%slock>", lock==0?"un":"");
 #endif
-    cprintf(cb, "<target><candidate/></target>");
+    target = device_handle_candidate_capable(dh) ? "candidate" : "running";
+    cprintf(cb, "<target><%s/></target>", target);
     cprintf(cb, "</%slock>", lock==0?"un":"");
     cprintf(cb, "</rpc>");
     if (device_handle_framing_type_get(dh) == NETCONF_SSH_CHUNKED){
@@ -439,6 +441,7 @@ device_create_edit_config_diff(clixon_handle h,
     int     i;
     cxobj  *xn;
     cxobj  *xa;
+    const char *target;
 
     clixon_debug(CLIXON_DBG_CTRL, "");
     /* 1. Add netconf operation attributes to add/del/change nodes in x0 and x1 and mark */
@@ -482,6 +485,7 @@ device_create_edit_config_diff(clixon_handle h,
         goto done;
     // XXX validate
     /* 4. Create two edit-config messages and parse them */
+    target = device_handle_candidate_capable(dh) ? "candidate" : "running";
     if (dlen) {
         if ((cb = cbuf_new()) == NULL){
             clixon_err(OE_PLUGIN, errno, "cbuf_new");
@@ -493,7 +497,7 @@ device_create_edit_config_diff(clixon_handle h,
                 device_handle_msg_id_getinc(dh)
                 );
         cprintf(cb, "<edit-config>");
-        cprintf(cb, "<target><candidate/></target>");
+        cprintf(cb, "<target><%s/></target>", target);
         cprintf(cb, "<default-operation>none</default-operation>");
         cprintf(cb, "<config>");
 #ifdef CLIXON_PLUGIN_USERDEF
@@ -520,7 +524,7 @@ device_create_edit_config_diff(clixon_handle h,
                 device_handle_msg_id_getinc(dh)
                 );
         cprintf(cb, "<edit-config>");
-        cprintf(cb, "<target><candidate/></target>");
+        cprintf(cb, "<target><%s/></target>", target);
         cprintf(cb, "<default-operation>none</default-operation>");
 #ifdef CLIXON_PLUGIN_USERDEF
         /* Rewrite x1 */
@@ -592,7 +596,22 @@ int
 device_send_validate(clixon_handle h,
                      device_handle dh)
 {
-    return device_send_rpc(h, dh, "<validate><source><candidate/></source></validate>");
+    const char *target = device_handle_candidate_capable(dh) ? "candidate" : "running";
+    cbuf *cb = NULL;
+    int retval = -1;
+
+    if ((cb = cbuf_new()) == NULL){
+        clixon_err(OE_UNIX, errno, "cbuf_new");
+        goto done;
+    }
+    cprintf(cb, "<validate><source><%s/></source></validate>", target);
+    if (device_send_rpc(h, dh, cbuf_get(cb)) < 0)
+        goto done;
+    retval = 0;
+ done:
+    if (cb)
+        cbuf_free(cb);
+    return retval;
 }
 
 /*! Send commit to device
