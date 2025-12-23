@@ -51,144 +51,59 @@
 #include "controller_lib.h"
 #include "controller_cli_callbacks.h"
 
-/*! Convert legacy mountpoint xpath prefixes to module names and append to cbuf
+/*! Given mount-point domain/spec and api_path_fmt, find api_path
  *
- * Older clixon versions passed mountpoint references as raw xpaths using
- * module prefixes. Newer API paths expect module names.
- */
-static int
-legacy_mtpoint_prefix2module(cbuf      *cb,
-                             const char *path,
-                             yang_stmt *yspec0)
-{
-    const char *seg = path;
-    const char *colon;
-
-    while ((colon = strchr(seg, ':')) != NULL){
-        const char *pfx_start = colon;
-
-        while (pfx_start > seg &&
-               (isalnum((unsigned char)pfx_start[-1]) ||
-                pfx_start[-1] == '_' || pfx_start[-1] == '-'))
-            pfx_start--;
-        if (pfx_start > seg)
-            cprintf(cb, "%.*s", (int)(pfx_start - seg), seg);
-        if (pfx_start < colon){
-            char      *prefix = NULL;
-            yang_stmt *ymod;
-
-            if ((prefix = strndup(pfx_start, colon - pfx_start)) == NULL){
-                clixon_err(OE_UNIX, errno, "strndup");
-                return -1;
-            }
-            if ((ymod = yang_find_module_by_prefix_yspec(yspec0, prefix)) != NULL)
-                cprintf(cb, "%s", yang_argument_get(ymod));
-            else
-                cprintf(cb, "%s", prefix);
-            free(prefix);
-        }
-        cprintf(cb, ":");
-        seg = colon + 1;
-    }
-    cprintf(cb, "%s", seg);
-    return 0;
-}
-
-/*!
- *
- * @param[in]  h        Clixon handle
- * @param[out] api_path Deallocate with free
- * @retval     0        OK
- * @retval    -1        Error
+ * @param[in]  h            Clixon handle
+ * @param[in]  cvv          Vector of cli string and instantiated variable
+ * @param[in]  domain       Domain of the mount-point (NULL for root)
+ * @param[in]  spec         yspec name of the mount-point (NULL for root)
+ * @param[in]  api_path_fmt API-path meta-format
+ * @param[in]  cvv_i        Index into cvv of last cvv entry used.
+ * @param[out] api_path     Deallocate with free
+ * @retval     0            OK
+ * @retval    -1            Error
  */
 static int
 cli_apipath(clixon_handle h,
             cvec         *cvv,
-            char         *mtpoint,
-            char         *api_path_fmt,
+            const char   *domain,
+            const char   *spec,
+            const char   *api_path_fmt,
             int          *cvvi,
             char        **api_path)
 {
     int        retval = -1;
     char      *api_path_fmt01 = NULL;
-    char      *mtdomain = NULL;
-    char      *mtspec = NULL;
-    cbuf      *cb = NULL;
     yang_stmt *yspec0;
 
     if ((yspec0 = clicon_dbspec_yang(h)) == NULL){
         clixon_err(OE_FATAL, 0, "No DB_SPEC");
         goto done;
     }
-    if (mtpoint){
-        if (mtpoint_decode(mtpoint, ":", &mtdomain, &mtspec) < 0)
+    if (domain){
+        /* Get and combined api-path01 */
+        if (mtpoint_paths(h, yspec0, domain, spec, api_path_fmt, &api_path_fmt01) < 0)
             goto done;
-        if (mtdomain){
-            /* Get and combined api-path01 */
-            if (mtpoint_paths(h, yspec0, mtdomain, mtspec, api_path_fmt, &api_path_fmt01) < 0)
-                goto done;
-            if (api_path_fmt2api_path(api_path_fmt01, cvv, yspec0, api_path, cvvi) < 0)
-                goto done;
-        }
-        else if (strncmp(mtpoint, "mtpoint:", strlen("mtpoint:")) == 0){
-            if ((cb = cbuf_new()) == NULL){
-                clixon_err(OE_UNIX, errno, "cbuf_new");
-                goto done;
-            }
-            if (legacy_mtpoint_prefix2module(cb, mtpoint + strlen("mtpoint:"), yspec0) < 0)
-                goto done;
-            /* Legacy form uses predicates: /dev[name='foo']/config -> /dev=foo/config */
-            if (strchr(cbuf_get(cb), '[')){
-                char *mapped = cbuf_get(cb);
-                char *br1 = strchr(mapped, '[');
-                char *br2 = br1 ? strchr(br1, ']') : NULL;
-                char *q1 = br1 ? strchr(br1, '\'') : NULL;
-                char *q2 = (q1 && br2 && q1 < br2) ? strchr(q1 + 1, '\'') : NULL;
-
-                if (br1 && br2 && q1 && q2 && q2 < br2){
-                    cbuf *cbtmp;
-
-                    if ((cbtmp = cbuf_new()) == NULL){
-                        clixon_err(OE_UNIX, errno, "cbuf_new");
-                        goto done;
-                    }
-                    cprintf(cbtmp, "%.*s=%%s%s",
-                            (int)(br1 - mapped),
-                            mapped,
-                            br2 + 1);
-                    cbuf_free(cb);
-                    cb = cbtmp;
-                }
-            }
-            cprintf(cb, "%s", api_path_fmt);
-            if (api_path_fmt2api_path(cbuf_get(cb), cvv, yspec0, api_path, cvvi) < 0)
-                goto done;
-        }
-        else{
-            if (api_path_fmt2api_path(api_path_fmt, cvv, yspec0, api_path, cvvi) < 0)
-                goto done;
-        }
+        if (api_path_fmt2api_path(api_path_fmt01, cvv, yspec0, api_path, cvvi) < 0)
+            goto done;
     }
     else{
         if (api_path_fmt2api_path(api_path_fmt, cvv, yspec0, api_path, cvvi) < 0)
             goto done;
     }
     retval = 0;
- done:
+done:
     if (api_path_fmt01)
         free(api_path_fmt01);
-    free(mtdomain);
-    free(mtspec);
-    if (cb)
-        cbuf_free(cb);
     return retval;
 }
 
-/*!
+/*! Controller cli helper function
  *
  * @param[in]  h            Clixon handle
  * @param[in]  cvv          Vector of cli string and instantiated variable
- * @param[in]  mtpoint      Moint-point
+ * @param[in]  domain       Domain of the mount-point (NULL for root)
+ * @param[in]  spec         yspec name of the mount-point (NULL for root)
  * @param[in]  api_path_fmt APi-path meta-format
  * @param[out] xpath        XPath (use free() to deallocate)
  * @param[out] nsc          Namespace context of xpath (free w cvec_free)
@@ -198,7 +113,8 @@ cli_apipath(clixon_handle h,
 static int
 cli_apipath2xpath(clixon_handle h,
                   cvec         *cvv,
-                  char         *mtpoint,
+                  const char   *domain,
+                  const char   *spec,
                   char         *api_path_fmt,
                   char        **xpath,
                   cvec        **nsc)
@@ -208,7 +124,7 @@ cli_apipath2xpath(clixon_handle h,
     char      *api_path = NULL;
     int        cvvi = 0;
 
-    if (cli_apipath(h, cvv, mtpoint, api_path_fmt, &cvvi, &api_path) < 0)
+    if (cli_apipath(h, cvv, domain, spec, api_path_fmt, &cvvi, &api_path) < 0)
         goto done;
     if ((yspec0 = clicon_dbspec_yang(h)) == NULL){
         clixon_err(OE_FATAL, 0, "No DB_SPEC");
@@ -236,8 +152,6 @@ cli_apipath2xpath(clixon_handle h,
  * @param[out] xdevsp    XML on the form <data><devices><device><name>x</name>...</data>. Must be freed
  * @retval     0         OK
  * @retval    -1         Error
- * @note due to https://github.com/clicon/clixon/issues/485, there is some complex filtering
- * in the yanglib case marked with "485" below
  */
 int
 rpc_get_yanglib_mount_match(clixon_handle h,
@@ -270,7 +184,7 @@ rpc_get_yanglib_mount_match(clixon_handle h,
             clicon_username_get(h),
             NETCONF_MESSAGE_ID_ATTR);
     cprintf(cb, "<get");
-    if (yanglib) // 485
+    if (yanglib)
         cprintf(cb, " %s:depth=\"%d\" xmlns:%s=\"%s\"",
                 CLIXON_LIB_PREFIX,
                 8,
@@ -282,9 +196,6 @@ rpc_get_yanglib_mount_match(clixon_handle h,
         cprintf(cb, "[ctrl:name='%s']", pattern);
     if (yanglib){
         cprintf(cb, "/ctrl:config");
-#if 0 // 485
-        cprintf(cb, "/yanglib:yang-library");
-#endif
     }
     else
         cprintf(cb, "/ctrl:name");
@@ -392,7 +303,8 @@ cli_show_auto_devs(clixon_handle h,
     char            *xpath = NULL;
     char            *api_path_fmt;  /* xml key format */
     char            *str;
-    char            *mtpoint = NULL;
+    char            *mtdomain = NULL;
+    char            *mtspec = NULL;
     cg_var          *cv;
     char            *pattern;
     cxobj           *xdevs = NULL;
@@ -414,14 +326,16 @@ cli_show_auto_devs(clixon_handle h,
     /* Concatenate all argv strings to a single string
      * Variant of cvec_concat_cb() where api-path-fmt may be interleaved with mtpoint,
      * eg /api-path-fmt2 mtpoint /api-path-fmt1 /api-path-fmt0
+     * Note loop is reverse and concat is done only for xpaths starting with "/"
      */
     for (i=cvec_len(argv)-1; i>=0; i--){
         cv = cvec_i(argv, i);
         if ((str = cv_string_get(cv)) == NULL)
             continue;
-        if (str && strncmp(str, "mtpoint:", strlen("mtpoint:")) == 0){
-            mtpoint = str;
-            devices = strstr(mtpoint, "/ctrl:devices") != NULL;
+        if (strncmp(str, MTPOINT_PREFIX, strlen(MTPOINT_PREFIX)) == 0){
+            if (mtpoint_decode(str, ":", &mtdomain, &mtspec) < 0)
+                goto done;
+            devices = 1;
             argc++;
             continue;
         }
@@ -431,7 +345,7 @@ cli_show_auto_devs(clixon_handle h,
         cprintf(api_path_fmt_cb, "%s", str);
     }
     api_path_fmt = cbuf_get(api_path_fmt_cb);
-    if (mtpoint == NULL || devices == 0)
+    if (mtdomain == NULL)
         devices = strstr(api_path_fmt, "/clixon-controller:devices") != NULL;
     if (cvec_len(argv) <= argc){
         clixon_err(OE_PLUGIN, EINVAL, "Missing: <datastore>");
@@ -466,7 +380,7 @@ cli_show_auto_devs(clixon_handle h,
         if (rpc_get_yanglib_mount_match(h, pattern, 0, 0, &xdevs) < 0)
             goto done;
         if (xdevs == NULL){
-            if (cli_apipath2xpath(h, cvv, mtpoint, api_path_fmt, &xpath, &nsc) < 0)
+            if (cli_apipath2xpath(h, cvv, mtdomain, mtspec, api_path_fmt, &xpath, &nsc) < 0)
                 goto done;
             if (cli_show_common(h, dbname, format, pretty, state,
                                 withdefault, extdefault,
@@ -480,7 +394,7 @@ cli_show_auto_devs(clixon_handle h,
                     continue;
                 cv_string_set(cv, devname); /* replace name */
                 /* aggregate to composite xpath */
-                if (cli_apipath2xpath(h, cvv, mtpoint, api_path_fmt, &xpath, &nsc) < 0)
+                if (cli_apipath2xpath(h, cvv, mtdomain, mtspec, api_path_fmt, &xpath, &nsc) < 0)
                     goto done;
                 /* Meta-info /comment need to follow language, but only for XML here */
                 if (format == FORMAT_XML)
@@ -503,7 +417,7 @@ cli_show_auto_devs(clixon_handle h,
         }
     }
     else {
-        if (cli_apipath2xpath(h, cvv, mtpoint, api_path_fmt, &xpath, &nsc) < 0)
+        if (cli_apipath2xpath(h, cvv, mtdomain, mtspec, api_path_fmt, &xpath, &nsc) < 0)
             goto done;
         if (cli_show_common(h, dbname, format, pretty, state,
                             withdefault, extdefault,
@@ -512,6 +426,10 @@ cli_show_auto_devs(clixon_handle h,
     }
     retval = 0;
  done:
+    if (mtdomain)
+        free(mtdomain);
+    if (mtspec)
+        free(mtspec);
     if (api_path_fmt_cb)
         cbuf_free(api_path_fmt_cb);
     if (xdevs)
@@ -536,7 +454,8 @@ cli_show_config_detail(clixon_handle h,
     cbuf      *api_path_fmt_cb = NULL;    /* xml key format */
     char      *api_path_fmt;  /* xml key format */
     char      *api_path = NULL;
-    char      *mtpoint = NULL;
+    char      *mtdomain = NULL;
+    char      *mtspec = NULL;
     cg_var    *cv;
     char      *str;
     int        i;
@@ -562,13 +481,15 @@ cli_show_config_detail(clixon_handle h,
     /* Concatenate all argv strings to a single string
      * Variant of cvec_concat_cb() where api-path-fmt may be interleaved with mtpoint,
      * eg /api-path-fmt2 mtpoint /api-path-fmt1 /api-path-fmt0
+     * Note loop is reverse and concat is done only for xpaths starting with "/"
      */
     for (i=cvec_len(argv)-1; i>=0; i--){
         cv = cvec_i(argv, i);
         if ((str = cv_string_get(cv)) == NULL)
             continue;
-        if (str && strncmp(str, "mtpoint:", strlen("mtpoint:")) == 0){
-            mtpoint = str;
+        if (strncmp(str, MTPOINT_PREFIX, strlen(MTPOINT_PREFIX)) == 0){
+            if (mtpoint_decode(str, ":", &mtdomain, &mtspec) < 0)
+                goto done;
             continue;
         }
         if (str[0] != '/')
@@ -576,11 +497,11 @@ cli_show_config_detail(clixon_handle h,
         cprintf(api_path_fmt_cb, "%s", str);
     }
     api_path_fmt = cbuf_get(api_path_fmt_cb);
-    if (cli_apipath2xpath(h, cvv, mtpoint, api_path_fmt, &xpath, &nsc) < 0)
+    if (cli_apipath2xpath(h, cvv, mtdomain, mtspec, api_path_fmt, &xpath, &nsc) < 0)
         goto done;
     if ((xtop = xml_new(NETCONF_INPUT_CONFIG, NULL, CX_ELMNT)) == NULL)
         goto done;
-    if (cli_apipath(h, cvv, mtpoint, api_path_fmt, &cvvi, &api_path) < 0)
+    if (cli_apipath(h, cvv, mtdomain, mtspec, api_path_fmt, &cvvi, &api_path) < 0)
         goto done;
     xbot = xtop;
     if ((ret = api_path2xml(api_path, yspec0, xtop, YC_DATANODE, 1, &xbot, &ys, &xerr)) < 0)
@@ -606,6 +527,10 @@ cli_show_config_detail(clixon_handle h,
 
     retval = 0;
  done:
+    if (mtdomain)
+        free(mtdomain);
+    if (mtspec)
+        free(mtspec);
     if (api_path_fmt_cb)
         cbuf_free(api_path_fmt_cb);
     if (api_path)
@@ -2312,8 +2237,10 @@ cli_dbxml_devs(clixon_handle       h,
     char      *api_path = NULL;
     cg_var    *cv;
     int        cvvi = 0;
-    char      *mtpoint = NULL;
+    char      *mtdomain = NULL;
+    char      *mtspec = NULL;
     char      *pattern;
+    char      *mtpoint = NULL;
     cxobj     *xdevs = NULL;
     cxobj     *xdev;
     char      *devname;
@@ -2336,6 +2263,7 @@ cli_dbxml_devs(clixon_handle       h,
     /* Concatenate all argv strings to a single string
      * Variant of cvec_concat_cb() where api-path-fmt may be interleaved with mtpoint,
      * eg /api-path-fmt2 mtpoint /api-path-fmt1 /api-path-fmt0
+     * Note loop is reverse and concat is done only for xpaths starting with "/"
      */
     for (i=cvec_len(argv)-1; i>=0; i--){
         cv = cvec_i(argv, i);
@@ -2345,23 +2273,19 @@ cli_dbxml_devs(clixon_handle       h,
         cprintf(api_path_fmt_cb, "%s", str);
     }
     api_path_fmt = cbuf_get(api_path_fmt_cb);
-    if (getenv("CTRL_DEBUG_MTP")){
-        fprintf(stderr, "cli_dbxml_devs argv_len=%zu api_fmt=%s\n",
-                (size_t)cvec_len(argv), api_path_fmt);
-        for (i=0; i<cvec_len(argv); i++){
-            cv = cvec_i(argv, i);
-            fprintf(stderr, "  argv[%d]=%s\n", i, cv_string_get(cv));
-        }
-        cv = NULL;
-        while ((cv = cvec_each(cvv, cv)) != NULL){
-            fprintf(stderr, "  cvv[%s]=%s\n", cv_name_get(cv), cv_string_get(cv));
-        }
+    /* See if 2nd arg is mountpoint and if devices cmd tree is selected */
+    if (cvec_len(argv) > 1 &&
+        (cv = cvec_i(argv, 1)) != NULL &&
+        (str = cv_string_get(cv)) != NULL){
+        if (mtpoint_decode(cv_string_get(cv), ":", &mtdomain, &mtspec) < 0)
+            goto done;
+        devices = 1;
     }
     /* Locate mountpoint argument if present and determine if device subtree */
     for (i=0; i<cvec_len(argv); i++){
         cv = cvec_i(argv, i);
         str = cv_string_get(cv);
-        if (str != NULL && strncmp(str, "mtpoint:", strlen("mtpoint:")) == 0){
+        if (str != NULL && strncmp(str, MTPOINT_PREFIX, strlen(MTPOINT_PREFIX)) == 0){
             mtpoint = str;
             devices = strstr(mtpoint, "/ctrl:devices") != NULL;
             break;
@@ -2374,7 +2298,7 @@ cli_dbxml_devs(clixon_handle       h,
         if (rpc_get_yanglib_mount_match(h, pattern, 0, 0, &xdevs) < 0)
             goto done;
         if (xdevs == NULL){
-            if (cli_apipath(h, cvv, mtpoint, api_path_fmt, &cvvi, &api_path) < 0)
+            if (cli_apipath(h, cvv, mtdomain, mtspec, api_path_fmt, &cvvi, &api_path) < 0)
                 goto done;
             if (cli_dbxml_devs_sub(h, cvv, op, nsctx, cvvi, api_path) < 0)
                 goto done;
@@ -2385,7 +2309,7 @@ cli_dbxml_devs(clixon_handle       h,
                 if ((devname = xml_find_body(xdev, "name")) == NULL)
                     continue;
                 cv_string_set(cv, devname); /* replace name */
-                if (cli_apipath(h, cvv, mtpoint, api_path_fmt, &cvvi, &api_path) < 0)
+                if (cli_apipath(h, cvv, mtdomain, mtspec, api_path_fmt, &cvvi, &api_path) < 0) // XXX
                     goto done;
                 if (cli_dbxml_devs_sub(h, cvv, op, nsctx, cvvi, api_path) < 0)
                     goto done;
@@ -2397,13 +2321,17 @@ cli_dbxml_devs(clixon_handle       h,
         }
     }
     else{
-        if (cli_apipath(h, cvv, mtpoint, api_path_fmt, &cvvi, &api_path) < 0)
+        if (cli_apipath(h, cvv, mtdomain, mtspec, api_path_fmt, &cvvi, &api_path) < 0)
             goto done;
         if (cli_dbxml_devs_sub(h, cvv, op, nsctx, cvvi, api_path) < 0)
             goto done;
     }
     retval = 0;
  done:
+    if (mtdomain)
+        free(mtdomain);
+    if (mtspec)
+        free(mtspec);
     if (xdevs)
         xml_free(xdevs);
     if (api_path_fmt_cb)
