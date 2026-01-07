@@ -287,7 +287,6 @@ device_input_cb(int   s,
     int                     sockerr;
     int                     ret;
 
-    clixon_debug(CLIXON_DBG_MSG | CLIXON_DBG_DETAIL, "");
     h = device_handle_handle_get(dh);
     frame_state = device_handle_frame_state_get(dh);
     frame_size = device_handle_frame_size_get(dh);
@@ -346,7 +345,7 @@ device_input_cb(int   s,
                                &eom) < 0)
             goto done;
         if (eom == 0){ /* frame not complete */
-            clixon_debug(CLIXON_DBG_MSG | CLIXON_DBG_DETAIL, "frame: %lu", cbuf_len(cbmsg));
+            clixon_debug(CLIXON_DBG_MSG | CLIXON_DBG_DETAIL2, "frame: %lu", cbuf_len(cbmsg));
             /* Extra data to read, save data and continue on next round */
             break;
         }
@@ -385,7 +384,6 @@ device_input_cb(int   s,
  ok:
     retval = 0;
  done:
-    clixon_debug(CLIXON_DBG_MSG | CLIXON_DBG_DETAIL, "retval:%d", retval);
     if (buferr)
         free(buferr);
     if (cberr)
@@ -579,9 +577,11 @@ device_state_timeout(int   s,
     name = device_handle_name_get(dh);
     clixon_debug(CLIXON_DBG_CTRL, "%s", name);
     h = device_handle_handle_get(dh);
-
-    if ((tid = device_handle_tid_get(dh)) != 0)
+    clixon_log(h, LOG_NOTICE, "%s Device state timeout. Waiting for device %s to change state from %s",
+               __func__, name, device_state_int2str(device_handle_conn_state_get(dh)));
+    if ((tid = device_handle_tid_get(dh)) != 0){
         ct = controller_transaction_find(h, tid);
+    }
     if (ct){
         if (controller_transaction_failed(device_handle_handle_get(dh), tid, ct, dh, TR_FAILED_DEV_CLOSE, name, "Timeout waiting for remote peer") < 0)
             goto done;
@@ -613,11 +613,10 @@ device_state_timeout_register(device_handle dh)
     name = device_handle_name_get(dh);
     gettimeofday(&t, NULL);
     h = device_handle_handle_get(dh);
-    d = clicon_data_int_get(h, "controller-device-timeout");
-    if (d != -1)
-        t1.tv_sec = d;
+    if ((d = clicon_data_int_get(h, "controller-device-timeout")) < 0)
+        t1.tv_sec = CONTROLLER_DEVICE_TIMEOUT_DEFAULT;
     else
-        t1.tv_sec = 60;
+        t1.tv_sec = d;
     t1.tv_usec = 0;
     clixon_debug(CLIXON_DBG_CTRL | CLIXON_DBG_DETAIL, "timeout:%ld s", t1.tv_sec);
     timeradd(&t, &t1, &t);
@@ -1119,7 +1118,7 @@ device_state_check_ok(clixon_handle           h,
         if (ct->ct_state != TS_RESOLVED){
             controller_transaction_state_set(ct, TS_RESOLVED, TR_SUCCESS);
         /* Garbage-collect yspecs with no mount-points */
-            if (0) /* Causes SEGV when reconnect */
+            if (1) /* Causes SEGV when reconnect */
                 if (yang_mount_cleanup(h) < 0)
                     goto done;
         }

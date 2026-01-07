@@ -100,7 +100,7 @@ disconnect_device_byxml(clixon_handle h,
     return 0;
 }
 
-/*! Changes in processes
+/*! Changes in processes config
  *
  * Start/stop services daemon
  * @retval    0    OK
@@ -140,7 +140,50 @@ controller_commit_processes(clixon_handle h,
     return retval;
 }
 
-/*! Commit device config
+/*! Changes in services config
+ *
+ * Start/stop services daemon
+ * @retval    0    OK
+ * @retval   -1    Error
+ * @see clixon-controller.yang: processes/services
+ */
+static int
+controller_commit_services(clixon_handle h,
+                           cvec         *nsc,
+                           cxobj        *src,
+                           cxobj        *target)
+{
+    int      retval = -1;
+    cxobj  **vec = NULL;
+    size_t   veclen;
+    cxobj   *x;
+    char    *body;
+    uint32_t dt;
+    int      i;
+
+    if (xpath_vec_flag(target, nsc, "services/service-timeout",
+                       XML_FLAG_ADD | XML_FLAG_CHANGE,
+                       &vec, &veclen) < 0)
+        goto done;
+    for (i=0; i<veclen; i++){ /* veclen should be 1 */
+        x = vec[i];
+        if ((body = xml_body(x)) == NULL)
+            continue;
+        if (parse_uint32(body, &dt, NULL) < 1){
+            clixon_err(OE_UNIX, errno, "error parsing limit:%s", body);
+            goto done;
+        }
+        clixon_debug(CLIXON_DBG_CTRL, "controller-service-timeout: %u", dt);
+        clicon_data_int_set(h, "controller-service-timeout", dt);
+    }
+    retval = 0;
+ done:
+    if (vec)
+        free(vec);
+    return retval;
+}
+
+/*! Changes in devices config
  *
  * @param[in] h    Clixon handle
  * @param[in] nsc  Namespace context
@@ -156,13 +199,13 @@ controller_commit_processes(clixon_handle h,
  * 2d) if device changed domain,profile: disconnect, reset xml, yang
  */
 static int
-controller_commit_device(clixon_handle h,
-                         cvec         *nsc,
-                         cxobj        *src,
-                         cxobj        *target)
+controller_commit_devices(clixon_handle h,
+                          cvec         *nsc,
+                          cxobj        *src,
+                          cxobj        *target)
 {
     int       retval = -1;
-    cxobj   **vec0= NULL;
+    cxobj   **vec0 = NULL;
     cxobj   **vec1 = NULL;
     cxobj   **vec2 = NULL;
     cxobj   **vec3 = NULL;
@@ -181,7 +224,7 @@ controller_commit_device(clixon_handle h,
                        XML_FLAG_ADD | XML_FLAG_CHANGE,
                        &vec0, &veclen0) < 0)
         goto done;
-    for (i=0; i<veclen0; i++){
+    for (i=0; i<veclen0; i++){ /* veclen0 should be 1 */
         x = vec0[i];
         if ((body = xml_body(x)) == NULL)
             continue;
@@ -189,6 +232,7 @@ controller_commit_device(clixon_handle h,
             clixon_err(OE_UNIX, errno, "error parsing limit:%s", body);
             goto done;
         }
+        clixon_debug(CLIXON_DBG_CTRL, "controller-device-timeout: %u", dt);
         clicon_data_int_set(h, "controller-device-timeout", dt);
     }
 
@@ -268,7 +312,7 @@ controller_commit(clixon_handle    h,
     yang_stmt *yspec;
     cvec      *nsc = NULL;
 
-    clixon_debug(CLIXON_DBG_CTRL, "");
+    clixon_debug(CLIXON_DBG_CTRL | CLIXON_DBG_DETAIL, "");
     src = transaction_src(td);    /* existing XML tree */
     target = transaction_target(td); /* wanted XML tree */
     yspec = clicon_dbspec_yang(h);
@@ -276,13 +320,15 @@ controller_commit(clixon_handle    h,
         goto done;
     if (xml_nsctx_add(nsc, NULL, CONTROLLER_NAMESPACE) < 0)
         goto done;
-    if (controller_commit_device(h, nsc, src, target) < 0)
+    if (controller_commit_services(h, nsc, src, target) < 0)
+        goto done;
+    if (controller_commit_devices(h, nsc, src, target) < 0)
         goto done;
     if (controller_commit_processes(h, nsc, src, target) < 0)
         goto done;
     retval = 0;
  done:
-    clixon_debug(CLIXON_DBG_CTRL, "retval:%d", retval);
+    clixon_debug(CLIXON_DBG_CTRL | CLIXON_DBG_DETAIL, "retval:%d", retval);
     if (nsc)
         cvec_free(nsc);
     return retval;
@@ -416,7 +462,6 @@ services_daemon_init(clixon_handle h)
     char       *group;
     char       *user;
 
-    clixon_debug(CLIXON_DBG_CTRL, "");
     /* Add pyapi user as NACM proxy user */
     user = clicon_backend_user(h);
     if (user && nacm_proxyuser_add(h, user) < 0)
@@ -463,6 +508,7 @@ services_daemon_init(clixon_handle h)
         clixon_err(OE_UNIX, 0, "calloc mismatatch i:%d nr:%d", i, nr);
         goto done;
     }
+    clixon_debug(CLIXON_DBG_CTRL, "%s %s", SERVICES_PROCESS, cmd);
     /* The actual fork/exec is made in clixon_process_operation/clixon_proc_background */
     if (clixon_process_register(h, SERVICES_PROCESS,
                                 "Controller action daemon process",
@@ -677,6 +723,13 @@ clixon_plugin_init(clixon_handle h)
         goto done;
     /* Reset dynamic device handle flag plugin allocation */
     clicon_data_int_set(h, "controller-device-flags", 0);
+
+    /* Register "ctrl" as a debug key */
+    if (clixon_debug_key_add("ctrl", CLIXON_DBG_APP) < 0)
+        goto done;
+    /* Set explicit debug limit */
+    clixon_debug_explicit_trunc_set(320);
+
     return &api;
  done:
     return NULL;

@@ -3,9 +3,15 @@
 ## 1.7.0
 Planned: February 2026
 
+### New features
+
+* New `clixon-controller@2025-12-01.yang` revision
+  * Added `service-timeout`
+
 ### Corrected Bugs
 
-* Fixed [Memory leak after reopening connection](https://github.com/clicon/clixon-controller/issues/169)
+* Fixed: [Candidate datastore lock prevents sequential commit operations via RESTCONF](https://github.com/clicon/clixon-controller/issues/236)
+* Fixed: [Memory leak after reopening connection](https://github.com/clicon/clixon-controller/issues/169)
 
 ## 1.6.0
 21 November 2025
