@@ -114,9 +114,7 @@ xe_openconfig_modify_recv(device_handle dh,
     const char *name;
 
     domain = device_handle_domain_get(dh);
-    name = device_handle_name_get(dh);
-    if ((domain == NULL || strcmp(domain, "xe") != 0) &&
-        (name == NULL || strcmp(name, "xe") != 0))
+    if ((domain == NULL || strcmp(domain, "xe") != 0))
         goto ok;
 
     if (xe_openconfig_remove(xdata, "//oc-if:interfaces/oc-if:interface/oc-eth:ethernet") < 0)
