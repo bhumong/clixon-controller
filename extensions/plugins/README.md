@@ -14,6 +14,9 @@ The following plugins exist:
 - cli-command   CLI plugin to run arbitrary shell commands on the server side.
                 The plugin maps CLI commands to shell commands and returns
                 the output as CLI output.
+- xe-openconfig Backend plugin for Cisco XE devices. Removes the OpenConfig
+               ethernet subtree on outgoing edit-config to avoid device-side
+               when-condition failures.
 
 To build and install a plugin, for example junos_native, do:
 
