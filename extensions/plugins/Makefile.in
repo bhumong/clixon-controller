@@ -23,7 +23,7 @@ VPATH       	= @srcdir@
 srcdir  	= @srcdir@
 top_srcdir  	= @top_srcdir@
 
-SUBDIRS  = junos-native cli-command xr-domain-must-fix
+SUBDIRS  = junos-native cli-command xr-yang xe-openconfig
 
 .PHONY: all clean depend install $(SUBDIRS)
 

@@ -8,7 +8,7 @@ controller can load the Cisco IOS XR schemas without failing the XPath parser.
 To build/install:
 
 ```
-cd extensions/plugins/xr-domain-must-fix
+cd extensions/plugins/xr-yang
 make
 make install
 ```
