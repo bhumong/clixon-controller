@@ -28,6 +28,8 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <limits.h>
+#include <unistd.h>
 
 #include <cligen/cligen.h>
 
@@ -39,6 +41,184 @@
 #include "controller.h"
 
 #define XR_DOMAIN "xr"
+#define YANG_CACHE_ENV "CLICON_YANG_DOMAIN_CACHE"
+#define YANG_CACHE_DEFAULT "/workspace/docker/dev/mounts"
+
+static int
+has_suffix(const char *str,
+           const char *suffix)
+{
+    size_t len;
+    size_t slen;
+
+    if (str == NULL || suffix == NULL)
+        return 0;
+    len = strlen(str);
+    slen = strlen(suffix);
+    if (slen > len)
+        return 0;
+    return strcmp(str + (len - slen), suffix) == 0;
+}
+
+static int
+ensure_dir(const char *path,
+           mode_t      mode)
+{
+    struct stat st;
+
+    if (path == NULL || *path == '\0')
+        return -1;
+    if (stat(path, &st) == 0){
+        if (S_ISDIR(st.st_mode))
+            return 0;
+        errno = ENOTDIR;
+        return -1;
+    }
+    if (mkdir(path, mode) < 0 && errno != EEXIST)
+        return -1;
+    return 0;
+}
+
+static int
+dir_has_yang_files(const char *dir)
+{
+    DIR           *dp;
+    struct dirent *de;
+    char           path[PATH_MAX];
+    struct stat    st;
+    int            found = 0;
+
+    if (dir == NULL)
+        return 0;
+    dp = opendir(dir);
+    if (dp == NULL)
+        return 0;
+    while ((de = readdir(dp)) != NULL){
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
+            continue;
+        if (snprintf(path, sizeof(path), "%s/%s", dir, de->d_name) >= (int)sizeof(path))
+            continue;
+        if (stat(path, &st) < 0)
+            continue;
+        if (S_ISDIR(st.st_mode)){
+            if (dir_has_yang_files(path)){
+                found = 1;
+                break;
+            }
+            continue;
+        }
+        if (S_ISREG(st.st_mode) && has_suffix(de->d_name, ".yang")){
+            found = 1;
+            break;
+        }
+    }
+    closedir(dp);
+    return found;
+}
+
+static int
+copy_file(const char *src,
+          const char *dst,
+          mode_t      mode)
+{
+    FILE  *in = NULL;
+    FILE  *out = NULL;
+    char   buf[8192];
+    size_t n;
+    int    retval = -1;
+
+    if ((in = fopen(src, "r")) == NULL)
+        goto done;
+    if ((out = fopen(dst, "w")) == NULL)
+        goto done;
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0){
+        if (fwrite(buf, 1, n, out) != n)
+            goto done;
+    }
+    if (ferror(in))
+        goto done;
+    if (fchmod(fileno(out), mode) < 0 && errno != EPERM)
+        goto done;
+    retval = 0;
+done:
+    if (out)
+        fclose(out);
+    if (in)
+        fclose(in);
+    return retval;
+}
+
+static int
+copy_tree(const char *src,
+          const char *dst)
+{
+    DIR           *dp = NULL;
+    struct dirent *de;
+    struct stat    st;
+    char           srcpath[PATH_MAX];
+    char           dstpath[PATH_MAX];
+    int            retval = -1;
+
+    if (stat(src, &st) < 0 || !S_ISDIR(st.st_mode))
+        return -1;
+    if (ensure_dir(dst, st.st_mode & 0777) < 0)
+        return -1;
+    if ((dp = opendir(src)) == NULL)
+        return -1;
+    while ((de = readdir(dp)) != NULL){
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
+            continue;
+        if (snprintf(srcpath, sizeof(srcpath), "%s/%s", src, de->d_name) >= (int)sizeof(srcpath))
+            continue;
+        if (snprintf(dstpath, sizeof(dstpath), "%s/%s", dst, de->d_name) >= (int)sizeof(dstpath))
+            continue;
+        if (stat(srcpath, &st) < 0)
+            continue;
+        if (S_ISDIR(st.st_mode)){
+            if (copy_tree(srcpath, dstpath) < 0)
+                goto done;
+            continue;
+        }
+        if (S_ISREG(st.st_mode)){
+            if (copy_file(srcpath, dstpath, st.st_mode & 0777) < 0)
+                goto done;
+        }
+    }
+    retval = 0;
+done:
+    if (dp)
+        closedir(dp);
+    return retval;
+}
+
+static int
+populate_domain_from_cache(const char *domain_dir,
+                           const char *domain)
+{
+    const char *cache_root = getenv(YANG_CACHE_ENV);
+    char        srcpath[PATH_MAX];
+
+    if (domain_dir == NULL || domain == NULL)
+        return 0;
+    if (dir_has_yang_files(domain_dir))
+        return 0;
+    if (cache_root == NULL || *cache_root == '\0')
+        cache_root = YANG_CACHE_DEFAULT;
+    if (snprintf(srcpath, sizeof(srcpath), "%s/%s", cache_root, domain) >= (int)sizeof(srcpath))
+        return 0;
+    if (copy_tree(srcpath, domain_dir) < 0){
+        clixon_debug(CLIXON_DBG_APP,
+                     "XR-domain-must-patch: failed to populate %s from %s",
+                     domain_dir,
+                     srcpath);
+        return 0;
+    }
+    clixon_debug(CLIXON_DBG_APP,
+                 "XR-domain-must-patch: populated %s from %s",
+                 domain_dir,
+                 srcpath);
+    return 0;
+}
 
 static int
 is_must_arg_and(const char *arg)
@@ -347,6 +527,7 @@ patch_xr_domain_files(clixon_handle h)
         }
         snprintf(domain_path, len, "%s/%s", domain_dir, XR_DOMAIN);
     }
+    (void)populate_domain_from_cache(domain_path, XR_DOMAIN);
     dir = opendir(domain_path);
     if (dir == NULL){
         free(domain_path);
@@ -485,7 +666,7 @@ fail:
 }
 
 static int
-xr_must_patch(clixon_handle h,
+xr_yang(clixon_handle h,
               yang_stmt   *ymod)
 {
     const char *filename;
@@ -512,7 +693,7 @@ xr_must_patch(clixon_handle h,
 
 static clixon_plugin_api api = {
     "xr-domain-must-patch",
-    .ca_yang_patch = xr_must_patch,
+    .ca_yang_patch = xr_yang,
 };
 
 clixon_plugin_api *

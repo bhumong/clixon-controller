@@ -10,11 +10,9 @@ statements inside `must` blocks, so the patch allows schema-mount parsing
 and `connection open` to succeed.
 
 At startup, the plugin scans `CLICON_YANG_DOMAIN_DIR` recursively and strips
-those lines from any `.yang` file it finds.
-
-Note: with no core controller changes, you must prepopulate the Nokia mount
-directory (for example by copying `docker/dev/mounts/nokia` into
-`/usr/local/share/controller/mounts/nokia`) before starting the backend.
+those lines from any `.yang` file it finds. If the Nokia mount directory is
+empty, it tries to populate it from `${CLICON_YANG_DOMAIN_CACHE}/nokia`.
+When the env var is unset, it falls back to `/workspace/docker/dev/mounts/nokia`.
 
 Build and install:
 

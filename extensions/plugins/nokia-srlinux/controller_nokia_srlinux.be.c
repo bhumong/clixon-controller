@@ -43,6 +43,173 @@
 #define IF_FEATURE_TOKEN "if-feature"
 #define EXTENSIONS_MODULE "srl_nokia-extensions"
 #define CONFIG_ROLE_MODULE "srl_nokia-configuration-role"
+#define YANG_CACHE_ENV "CLICON_YANG_DOMAIN_CACHE"
+#define YANG_CACHE_DEFAULT "/workspace/docker/dev/mounts"
+
+static int has_suffix(const char *str, const char *suffix);
+static int list_contains(char **list, size_t len, const char *name);
+static int list_add(char ***list, size_t *len, const char *name);
+static void list_free(char **list, size_t len);
+
+static int
+ensure_dir(const char *path,
+           mode_t      mode)
+{
+    struct stat st;
+
+    if (path == NULL || *path == '\0')
+        return -1;
+    if (stat(path, &st) == 0){
+        if (S_ISDIR(st.st_mode))
+            return 0;
+        errno = ENOTDIR;
+        return -1;
+    }
+    if (mkdir(path, mode) < 0 && errno != EEXIST)
+        return -1;
+    return 0;
+}
+
+static int
+dir_has_yang_files(const char *dir)
+{
+    DIR           *dp;
+    struct dirent *de;
+    char           path[PATH_MAX];
+    struct stat    st;
+    int            found = 0;
+
+    if (dir == NULL)
+        return 0;
+    dp = opendir(dir);
+    if (dp == NULL)
+        return 0;
+    while ((de = readdir(dp)) != NULL){
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
+            continue;
+        if (snprintf(path, sizeof(path), "%s/%s", dir, de->d_name) >= (int)sizeof(path))
+            continue;
+        if (stat(path, &st) < 0)
+            continue;
+        if (S_ISDIR(st.st_mode)){
+            if (dir_has_yang_files(path)){
+                found = 1;
+                break;
+            }
+            continue;
+        }
+        if (S_ISREG(st.st_mode) && has_suffix(de->d_name, ".yang")){
+            found = 1;
+            break;
+        }
+    }
+    closedir(dp);
+    return found;
+}
+
+static int
+copy_file(const char *src,
+          const char *dst,
+          mode_t      mode)
+{
+    FILE  *in = NULL;
+    FILE  *out = NULL;
+    char   buf[8192];
+    size_t n;
+    int    retval = -1;
+
+    if ((in = fopen(src, "r")) == NULL)
+        goto done;
+    if ((out = fopen(dst, "w")) == NULL)
+        goto done;
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0){
+        if (fwrite(buf, 1, n, out) != n)
+            goto done;
+    }
+    if (ferror(in))
+        goto done;
+    if (fchmod(fileno(out), mode) < 0 && errno != EPERM)
+        goto done;
+    retval = 0;
+done:
+    if (out)
+        fclose(out);
+    if (in)
+        fclose(in);
+    return retval;
+}
+
+static int
+copy_tree(const char *src,
+          const char *dst)
+{
+    DIR           *dp = NULL;
+    struct dirent *de;
+    struct stat    st;
+    char           srcpath[PATH_MAX];
+    char           dstpath[PATH_MAX];
+    int            retval = -1;
+
+    if (stat(src, &st) < 0 || !S_ISDIR(st.st_mode))
+        return -1;
+    if (ensure_dir(dst, st.st_mode & 0777) < 0)
+        return -1;
+    if ((dp = opendir(src)) == NULL)
+        return -1;
+    while ((de = readdir(dp)) != NULL){
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
+            continue;
+        if (snprintf(srcpath, sizeof(srcpath), "%s/%s", src, de->d_name) >= (int)sizeof(srcpath))
+            continue;
+        if (snprintf(dstpath, sizeof(dstpath), "%s/%s", dst, de->d_name) >= (int)sizeof(dstpath))
+            continue;
+        if (stat(srcpath, &st) < 0)
+            continue;
+        if (S_ISDIR(st.st_mode)){
+            if (copy_tree(srcpath, dstpath) < 0)
+                goto done;
+            continue;
+        }
+        if (S_ISREG(st.st_mode)){
+            if (copy_file(srcpath, dstpath, st.st_mode & 0777) < 0)
+                goto done;
+        }
+    }
+    retval = 0;
+done:
+    if (dp)
+        closedir(dp);
+    return retval;
+}
+
+static int
+populate_domain_from_cache(const char *domain_dir,
+                           const char *domain)
+{
+    const char *cache_root = getenv(YANG_CACHE_ENV);
+    char        srcpath[PATH_MAX];
+
+    if (domain_dir == NULL || domain == NULL)
+        return 0;
+    if (dir_has_yang_files(domain_dir))
+        return 0;
+    if (cache_root == NULL || *cache_root == '\0')
+        cache_root = YANG_CACHE_DEFAULT;
+    if (snprintf(srcpath, sizeof(srcpath), "%s/%s", cache_root, domain) >= (int)sizeof(srcpath))
+        return 0;
+    if (copy_tree(srcpath, domain_dir) < 0){
+        clixon_debug(CLIXON_DBG_APP,
+                     "nokia-srlinux: failed to populate %s from %s",
+                     domain_dir,
+                     srcpath);
+        return 0;
+    }
+    clixon_debug(CLIXON_DBG_APP,
+                 "nokia-srlinux: populated %s from %s",
+                 domain_dir,
+                 srcpath);
+    return 0;
+}
 
 static int
 has_suffix(const char *str,
@@ -58,6 +225,61 @@ has_suffix(const char *str,
     if (slen > len)
         return 0;
     return strcmp(str + (len - slen), suffix) == 0;
+}
+
+static int
+list_contains(char **list,
+              size_t len,
+              const char *name)
+{
+    size_t i;
+
+    if (list == NULL || name == NULL)
+        return 0;
+    for (i = 0; i < len; i++){
+        if (list[i] && strcmp(list[i], name) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+static int
+list_add(char ***list,
+         size_t *len,
+         const char *name)
+{
+    char  *dup;
+    char **tmp;
+
+    if (list == NULL || len == NULL || name == NULL)
+        return -1;
+    if (list_contains(*list, *len, name))
+        return 0;
+    dup = strdup(name);
+    if (dup == NULL)
+        return -1;
+    tmp = realloc(*list, (*len + 1) * sizeof(**list));
+    if (tmp == NULL){
+        free(dup);
+        return -1;
+    }
+    *list = tmp;
+    (*list)[*len] = dup;
+    (*len)++;
+    return 0;
+}
+
+static void
+list_free(char **list,
+          size_t len)
+{
+    size_t i;
+
+    if (list == NULL)
+        return;
+    for (i = 0; i < len; i++)
+        free(list[i]);
+    free(list);
 }
 
 static int
@@ -234,14 +456,234 @@ submodule_exists(const char *dir,
 }
 
 static int
+find_submodule_path(const char *dir,
+                    const char *name,
+                    char       *out,
+                    size_t      outlen)
+{
+    DIR           *dp;
+    struct dirent *de;
+    size_t         namelen;
+
+    if (dir == NULL || name == NULL || out == NULL || outlen == 0)
+        return -1;
+    namelen = strlen(name);
+    if (namelen == 0)
+        return -1;
+    if (snprintf(out, outlen, "%s/%s.yang", dir, name) < (int)outlen &&
+        access(out, F_OK) == 0)
+        return 0;
+    dp = opendir(dir);
+    if (dp == NULL)
+        return -1;
+    while ((de = readdir(dp)) != NULL){
+        if (strncmp(de->d_name, name, namelen) != 0)
+            continue;
+        if (de->d_name[namelen] != '@')
+            continue;
+        if (!has_suffix(de->d_name, ".yang"))
+            continue;
+        if (snprintf(out, outlen, "%s/%s", dir, de->d_name) >= (int)outlen)
+            continue;
+        closedir(dp);
+        return 0;
+    }
+    closedir(dp);
+    return -1;
+}
+
+static int
+collect_groupings_from_file(const char *path,
+                            char      ***groupings,
+                            size_t     *groupings_len)
+{
+    FILE   *fp;
+    char   *line = NULL;
+    size_t  cap = 0;
+    int     retval = -1;
+
+    if (path == NULL || groupings == NULL || groupings_len == NULL)
+        return 0;
+    if ((fp = fopen(path, "r")) == NULL)
+        return 0;
+    while (getline(&line, &cap, fp) != -1){
+        char token[128];
+
+        if (parse_keyword_arg(line, strlen(line), "grouping", token, sizeof(token))){
+            if (list_add(groupings, groupings_len, token) < 0)
+                goto done;
+        }
+    }
+    if (ferror(fp))
+        goto done;
+    retval = 0;
+done:
+    if (fp)
+        fclose(fp);
+    free(line);
+    return retval;
+}
+
+static int
+collect_groupings_from_includes(const char *dir,
+                                char      **includes,
+                                size_t      include_len,
+                                char      ***groupings,
+                                size_t     *groupings_len)
+{
+    size_t i;
+
+    if (dir == NULL || includes == NULL || groupings == NULL || groupings_len == NULL)
+        return 0;
+    for (i = 0; i < include_len; i++){
+        char path[PATH_MAX];
+
+        if (includes[i] == NULL || includes[i][0] == '\0')
+            continue;
+        if (find_submodule_path(dir, includes[i], path, sizeof(path)) < 0)
+            continue;
+        if (collect_groupings_from_file(path, groupings, groupings_len) < 0)
+            return -1;
+    }
+    return 0;
+}
+
+static int
+add_groupings_to_submodule(const char *dir,
+                           const char *name,
+                           char      **groupings,
+                           size_t      groupings_len)
+{
+    char         path[PATH_MAX];
+    char         tmp[PATH_MAX];
+    struct stat  st;
+    FILE        *fp = NULL;
+    char        *buf = NULL;
+    long         sz = 0;
+    size_t       end;
+    size_t       i;
+    cbuf        *out = NULL;
+    char       **existing = NULL;
+    size_t       existing_len = 0;
+    int          add = 0;
+    int          retval = -1;
+
+    tmp[0] = '\0';
+    if (groupings == NULL || groupings_len == 0)
+        return 0;
+    if (find_submodule_path(dir, name, path, sizeof(path)) < 0)
+        return 0;
+    if (stat(path, &st) < 0)
+        return -1;
+    if ((fp = fopen(path, "r")) == NULL)
+        return -1;
+    if (fseek(fp, 0, SEEK_END) < 0)
+        goto done;
+    sz = ftell(fp);
+    if (sz < 0)
+        goto done;
+    if (fseek(fp, 0, SEEK_SET) < 0)
+        goto done;
+    buf = malloc((size_t)sz + 1);
+    if (buf == NULL)
+        goto done;
+    if (fread(buf, 1, (size_t)sz, fp) != (size_t)sz)
+        goto done;
+    buf[sz] = '\0';
+    fclose(fp);
+    fp = NULL;
+
+    {
+        char *line = NULL;
+        char *cursor = buf;
+        char *next;
+
+        while ((next = strchr(cursor, '\n')) != NULL){
+            size_t len = (size_t)(next - cursor + 1);
+
+            free(line);
+            line = strndup(cursor, len);
+            if (line == NULL)
+                break;
+            if (parse_keyword_arg(line, len, "grouping", line, len))
+                list_add(&existing, &existing_len, line);
+            cursor = next + 1;
+        }
+        free(line);
+    }
+
+    for (i = 0; i < groupings_len; i++){
+        if (!list_contains(existing, existing_len, groupings[i])){
+            add = 1;
+            break;
+        }
+    }
+    if (!add){
+        retval = 0;
+        goto done;
+    }
+    end = (size_t)sz;
+    while (end > 0 && isspace((unsigned char)buf[end - 1]))
+        end--;
+    if (end == 0 || buf[end - 1] != '}'){
+        retval = 0;
+        goto done;
+    }
+    if ((out = cbuf_new()) == NULL)
+        goto done;
+    cprintf(out, "%.*s", (int)(end - 1), buf);
+    if (end >= 2 && buf[end - 2] != '\n')
+        cprintf(out, "\n");
+    for (i = 0; i < groupings_len; i++){
+        if (list_contains(existing, existing_len, groupings[i]))
+            continue;
+        cprintf(out, "  grouping %s {\n", groupings[i]);
+        cprintf(out, "  }\n");
+    }
+    cprintf(out, "}\n");
+    if (snprintf(tmp, sizeof(tmp), "%s.clixon_tmp", path) >= (int)sizeof(tmp))
+        goto done;
+    if ((fp = fopen(tmp, "w")) == NULL)
+        goto done;
+    if (fwrite(cbuf_get(out), 1, strlen(cbuf_get(out)), fp) != strlen(cbuf_get(out)))
+        goto done;
+    if (fflush(fp) != 0)
+        goto done;
+    if (fsync(fileno(fp)) < 0)
+        goto done;
+    if (fchmod(fileno(fp), st.st_mode) < 0 && errno != EPERM)
+        goto done;
+    if (fchown(fileno(fp), st.st_uid, st.st_gid) < 0 && errno != EPERM)
+        goto done;
+    fclose(fp);
+    fp = NULL;
+    if (rename(tmp, path) < 0)
+        goto done;
+    retval = 0;
+done:
+    if (fp)
+        fclose(fp);
+    if (tmp[0] != '\0')
+        unlink(tmp);
+    if (out)
+        cbuf_free(out);
+    list_free(existing, existing_len);
+    free(buf);
+    return retval;
+}
+
+static int
 ensure_submodule_stub(const char *dir,
                       const char *name,
                       const char *module,
                       const char *prefix,
-                      mode_t      mode)
+                      mode_t      mode,
+                      char      **groupings,
+                      size_t      groupings_len)
 {
     FILE *f;
     char  path[PATH_MAX];
+    size_t i;
 
     if (snprintf(path, sizeof(path), "%s/%s.yang", dir, name) >= (int)sizeof(path)){
         clixon_err(OE_UNIX, ENAMETOOLONG, "submodule path %s/%s.yang", dir, name);
@@ -255,6 +697,12 @@ ensure_submodule_stub(const char *dir,
     fprintf(f, "  belongs-to %s {\n", module);
     fprintf(f, "    prefix %s;\n", prefix);
     fprintf(f, "  }\n");
+    for (i = 0; i < groupings_len; i++){
+        if (groupings[i] == NULL || groupings[i][0] == '\0')
+            continue;
+        fprintf(f, "  grouping %s {\n", groupings[i]);
+        fprintf(f, "  }\n");
+    }
     fprintf(f, "}\n");
     fclose(f);
     if (chmod(path, mode) < 0)
@@ -268,11 +716,14 @@ ensure_submodules(const char *path,
                   const char *prefix,
                   char      **includes,
                   size_t      include_len,
-                  mode_t      mode)
+                  mode_t      mode,
+                  char      **missing_groupings,
+                  size_t      missing_len)
 {
     const char *slash;
     char        dir[PATH_MAX];
     size_t      i;
+    int         wrote_groupings = 0;
 
     if (path == NULL || module == NULL || prefix == NULL)
         return 0;
@@ -285,12 +736,27 @@ ensure_submodules(const char *path,
     dir[slash - path] = '\0';
     for (i = 0; i < include_len; i++){
         const char *name = includes[i];
+        char      **grp = NULL;
+        size_t      grp_len = 0;
 
         if (name == NULL || name[0] == '\0')
             continue;
-        if (submodule_exists(dir, name))
+        if (submodule_exists(dir, name)){
+            if (!wrote_groupings && missing_len > 0){
+                if (add_groupings_to_submodule(dir, name,
+                                               missing_groupings,
+                                               missing_len) < 0)
+                    return -1;
+                wrote_groupings = 1;
+            }
             continue;
-        if (ensure_submodule_stub(dir, name, module, prefix, mode) < 0)
+        }
+        if (!wrote_groupings && missing_len > 0){
+            grp = missing_groupings;
+            grp_len = missing_len;
+            wrote_groupings = 1;
+        }
+        if (ensure_submodule_stub(dir, name, module, prefix, mode, grp, grp_len) < 0)
             return -1;
         clixon_debug(CLIXON_DBG_APP, "Created stub submodule %s.yang", name);
     }
@@ -334,6 +800,12 @@ patch_yang_file(const char *path)
     char        module_prefix[128] = {0};
     char      **includes = NULL;
     size_t      include_len = 0;
+    char      **groupings = NULL;
+    size_t      groupings_len = 0;
+    char      **uses = NULL;
+    size_t      uses_len = 0;
+    char      **missing_groupings = NULL;
+    size_t      missing_len = 0;
     char        tmp[PATH_MAX];
 
     tmp[0] = '\0';
@@ -409,6 +881,16 @@ patch_yang_file(const char *path)
                 includes[include_len++] = dup;
             }
         }
+        if (parse_keyword_arg(line, (size_t)linelen, "grouping", token, sizeof(token))){
+            if (list_add(&groupings, &groupings_len, token) < 0)
+                goto done;
+        }
+        if (parse_keyword_arg(line, (size_t)linelen, "uses", token, sizeof(token))){
+            if (strchr(token, ':') == NULL){
+                if (list_add(&uses, &uses_len, token) < 0)
+                    goto done;
+            }
+        }
         if (strip_patterns && line_is_pattern_stmt(line, (size_t)linelen)){
             changed = 1;
             continue;
@@ -421,9 +903,31 @@ patch_yang_file(const char *path)
         goto done;
     }
     if (!is_submodule && have_module && include_len > 0){
+        const char *slash;
+        char        dir[PATH_MAX];
+
         if (!have_prefix)
             snprintf(module_prefix, sizeof(module_prefix), "%s", module_name);
-        if (ensure_submodules(path, module_name, module_prefix, includes, include_len, st.st_mode) < 0)
+        slash = strrchr(path, '/');
+        if (slash != NULL && (size_t)(slash - path) < sizeof(dir)){
+            memcpy(dir, path, (size_t)(slash - path));
+            dir[slash - path] = '\0';
+            if (collect_groupings_from_includes(dir, includes, include_len,
+                                                &groupings, &groupings_len) < 0)
+                goto done;
+        }
+        if (uses){
+            size_t i;
+
+            for (i = 0; i < uses_len; i++){
+                if (!list_contains(groupings, groupings_len, uses[i])){
+                    if (list_add(&missing_groupings, &missing_len, uses[i]) < 0)
+                        goto done;
+                }
+            }
+        }
+        if (ensure_submodules(path, module_name, module_prefix, includes, include_len,
+                              st.st_mode, missing_groupings, missing_len) < 0)
             goto done;
     }
     if (!changed){
@@ -456,6 +960,9 @@ patch_yang_file(const char *path)
             free(includes[i]);
         free(includes);
     }
+    list_free(groupings, groupings_len);
+    list_free(uses, uses_len);
+    list_free(missing_groupings, missing_len);
     if (line)
         free(line);
     if (retval <= 0 && tmp[0] != '\0')
@@ -524,6 +1031,7 @@ nokia_srlinux_start(clixon_handle h)
         goto done;
     }
     cprintf(cb, "%s/nokia", dir);
+    (void)populate_domain_from_cache(cbuf_get(cb), "nokia");
     retval = patch_yang_dir(cbuf_get(cb));
  done:
     if (cb)

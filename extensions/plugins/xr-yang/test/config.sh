@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# ***** BEGIN LICENSE BLOCK *****
+# 
+# Copyright (C) 2023 Olof Hagsand
+#
+# This file is part of CLIXON
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Alternatively, the contents of this file may be used under the terms of
+# the GNU General Public License Version 3 or later (the "GPL"),
+# in which case the provisions of the GPL are applicable instead
+# of those above. If you wish to allow use of your version of this file only
+# under the terms of the GPL, and not to allow others to
+# use your version of this file under the terms of Apache License version 2, 
+# indicate your decision by deleting the provisions above and replace them with
+# the notice and other provisions required by the GPL. If you do not delete
+# the provisions above, a recipient may use your version of this file under
+# the terms of any one of the Apache License version 2 or the GPL.
+#
+# ***** END LICENSE BLOCK *****
+#
+# Generated from autotools, ie from the ./configure run,
+# See configure.ac for source
+
+SYSCONFDIR=/usr/local/etc
+DATADIR=/usr/local/share
+LIBDIR=/usr/local/lib
+LOCALSTATEDIR=/usr/local/var
+RUNSTATEDIR=/usr/local/var/run
+BINDIR=/usr/local/bin
+SBINDIR=/usr/local/sbin
+
+CLICON_USER=clicon
+CLICON_GROUP=clicon
+
+# This is for RESTCONF.  There are three options:
+# --without-restconf     No restconf support
+# --with-restconf=fcgi   FCGI interface for separate web reverse proxy like nginx
+# --with-restconf=native Integration with embedded web server
+#WITH_RESTCONF=fcgi
+WITH_RESTCONF=native
+
+# HTTP/2?
+# If set, curl options are set to use --http2 which may not be what you want, ie
+# you may want to force it to http/1 for example
+# If so, override before test
+# Set to false for restconf=fcgi
+#HAVE_LIBNGHTTP2=false
+HAVE_LIBNGHTTP2=true
+HAVE_HTTP1=true
+
+# Length of TSL RSA key
+# Problem with small key such as 1024 not allowed in centos8 for example (why is this)
+# Problem with long keys are they take time to generate, eg on ARM
+CERTKEYLEN=2048

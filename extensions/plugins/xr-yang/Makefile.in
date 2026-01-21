@@ -47,7 +47,7 @@ CPPFLAGS    = @CPPFLAGS@ -fPIC -DSSH_BIN=\"@SSH_BIN@\" -DCONTROLLER_VERSION=\"$(
 EXTRA           = $(top_builddir)/src/controller_device*.o $(top_builddir)/src/controller_lib.o $(top_builddir)/src/controller_rpc.o $(top_builddir)/src/controller_transaction.o $(top_builddir)/src/controller_netconf.o $(top_builddir)/src/build.o
 CONTROLLER_VERSION = @CONTROLLER_VERSION@
 
-BE_SRC    = controller_xr_must_patch.be.c
+BE_SRC    = controller_xr_yang.be.c
 BE_OBJ    = $(BE_SRC:%.c=%.o)
 BE_PLUGIN = $(BE_SRC:%.c=%.so)
 
