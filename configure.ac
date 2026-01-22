@@ -213,9 +213,9 @@ AC_CONFIG_FILES([Makefile
                  extensions/plugins/Makefile
  		 extensions/plugins/junos-native/Makefile
  		 extensions/plugins/cli-command/Makefile		 
- 		 extensions/plugins/cli-command/Makefile
- 		 extensions/plugins/cli-command/Makefile
- 		 extensions/plugins/cli-command/Makefile
+ 		 extensions/plugins/xe-openconfig/Makefile		 
+ 		 extensions/plugins/xr-yang/Makefile		 
+ 		 extensions/plugins/nokia-srlinux/Makefile		 
 		 extensions/yang/Makefile
 		 extensions/yang/junos-bgp/Makefile
 		 extensions/yang/junos-macsec/Makefile
