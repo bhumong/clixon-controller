@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<clixon-config xmlns="http://clicon.org/config">
+  <!-- Controller requires startup datastore -->
+  <CLICON_FEATURE>ietf-netconf:startup</CLICON_FEATURE>
+  <!-- Allow no auth just for debug -->
+  <CLICON_FEATURE>clixon-restconf:allow-auth-none</CLICON_FEATURE>
+  <CLICON_FEATURE>clixon-restconf:fcgi</CLICON_FEATURE>
+  <!-- See also src/Makefile.in and yang/Makefile.in -->
+  <CLICON_CONFIGFILE>/usr/local/etc/clixon/controller.xml</CLICON_CONFIGFILE>
+  <CLICON_CONFIGDIR>/usr/local/etc/clixon/controller</CLICON_CONFIGDIR>
+  <CLICON_CONFIG_EXTEND>clixon-controller-config</CLICON_CONFIG_EXTEND>
+  <!-- Clixon-generic yangs -->
+  <CLICON_YANG_DIR>/usr/local/share/clixon</CLICON_YANG_DIR>
+  <!-- Controller-specific yangs -->
+  <CLICON_YANG_DIR>/usr/local/share/controller/common</CLICON_YANG_DIR>
+  <!-- Controller loads all YANGs in the following dir -->
+  <CLICON_YANG_MAIN_DIR>/usr/local/share/controller/main</CLICON_YANG_MAIN_DIR>
+  <!-- Device mount-point YANGs are placed in the following dir + domain -->
+  <CLICON_YANG_DOMAIN_DIR>/usr/local/share/controller/mounts</CLICON_YANG_DOMAIN_DIR>
+  <!-- Yang schema mount is enabled for controller -->
+  <CLICON_YANG_SCHEMA_MOUNT>true</CLICON_YANG_SCHEMA_MOUNT>
+  <!-- Optimization to share YANGs within YANG domain -->
+  <CLICON_YANG_SCHEMA_MOUNT_SHARE>true</CLICON_YANG_SCHEMA_MOUNT_SHARE>
+  <!-- Yang mem optimization: augments/uses: use original object -->
+  <CLICON_YANG_USE_ORIGINAL>true</CLICON_YANG_USE_ORIGINAL>
+  <!-- Backend -->
+  <CLICON_BACKEND_DIR>/usr/local/lib/controller/backend</CLICON_BACKEND_DIR>
+  <CLICON_BACKEND_USER>clicon</CLICON_BACKEND_USER>
+  <!-- Cannot use drop_perm because:
+       1. XMLDB_MULTI creates new files (Fixed)
+       2. SSH keys to devices are root keys in scripts
+  -->
+  <CLICON_BACKEND_PRIVILEGES>none</CLICON_BACKEND_PRIVILEGES>
+  <CLICON_BACKEND_PIDFILE>/usr/local/var/run/controller/controller.pid</CLICON_BACKEND_PIDFILE>
+  <!-- Start restconf daemon from backend -->
+  <CLICON_BACKEND_RESTCONF_PROCESS>true</CLICON_BACKEND_RESTCONF_PROCESS>
+  <!-- Disable duplicate check in NETCONF messages. pyapi issue: it is not yang aware-->
+  <CLICON_NETCONF_DUPLICATE_ALLOW>true</CLICON_NETCONF_DUPLICATE_ALLOW>
+  <!-- RESTCONF -->
+  <CLICON_RESTCONF_INSTALLDIR>/usr/local/sbin</CLICON_RESTCONF_INSTALLDIR>
+  <CLICON_RESTCONF_USER>clicon</CLICON_RESTCONF_USER>
+  <CLICON_RESTCONF_DIR>/usr/local/lib/controller/restconf</CLICON_RESTCONF_DIR>
+  <CLICON_RESTCONF_PRIVILEGES>drop_perm</CLICON_RESTCONF_PRIVILEGES>
+  <!-- CLI/CLISPEC -->
+  <CLICON_CLI_DIR>/usr/local/lib/controller/cli</CLICON_CLI_DIR>
+  <CLICON_CLISPEC_DIR>/usr/local/lib/controller/clispec</CLICON_CLISPEC_DIR>
+  <CLICON_AUTOCLI_CACHE_DIR>/usr/local/lib/controller/autocli</CLICON_AUTOCLI_CACHE_DIR>
+  <CLICON_CLI_MODE>operation</CLICON_CLI_MODE>
+  <CLICON_CLI_TAB_MODE>0</CLICON_CLI_TAB_MODE>
+  <CLICON_CLI_HELPSTRING_TRUNCATE>true</CLICON_CLI_HELPSTRING_TRUNCATE>
+  <CLICON_CLI_HELPSTRING_LINES>1</CLICON_CLI_HELPSTRING_LINES>
+  <!-- Default output format for show config etc -->
+  <CLICON_CLI_OUTPUT_FORMAT>xml</CLICON_CLI_OUTPUT_FORMAT>
+  <!-- Socket -->
+  <CLICON_SOCK>/usr/local/var/run/controller/controller.sock</CLICON_SOCK>
+  <CLICON_SOCK_GROUP>clicon</CLICON_SOCK_GROUP>
+  <!-- Backend socket prioritized over SB devices -->
+  <CLICON_SOCK_PRIO>true</CLICON_SOCK_PRIO>
+  <!-- Enable for exclusive lock on edit -->
+  <CLICON_AUTOLOCK>false</CLICON_AUTOLOCK>
+  <!-- Datastore -->
+  <CLICON_XMLDB_DIR>/usr/local/var/controller</CLICON_XMLDB_DIR>
+  <!-- Split datastores into multiple files -->
+  <CLICON_XMLDB_MULTI>true</CLICON_XMLDB_MULTI>
+  <CLICON_STARTUP_MODE>running</CLICON_STARTUP_MODE>
+  <!-- NACM is inlined in configuration -->
+  <CLICON_NACM_MODE>internal</CLICON_NACM_MODE>
+  <CLICON_NACM_DISABLED_ON_EMPTY>true</CLICON_NACM_DISABLED_ON_EMPTY>
+  <!-- Controller uses notifications -->
+  <CLICON_STREAM_DISCOVERY_RFC5277>true</CLICON_STREAM_DISCOVERY_RFC5277>
+  <!-- Log to syslog and stderr. no log length limitation -->
+  <CLICON_LOG_DESTINATION>syslog stderr</CLICON_LOG_DESTINATION>
+  <CLICON_LOG_STRING_LIMIT>0</CLICON_LOG_STRING_LIMIT>
+  <!-- Use poll event handling -->
+  <CLICON_EVENT_SELECT>false</CLICON_EVENT_SELECT>
+  <!-- Dir to store pipe scripts -->
+  <CLICON_CLI_PIPE_DIR>/usr/local/share/controller/pipe/</CLICON_CLI_PIPE_DIR>
+  <!-- PYAPI specialization (see CLICON_CONFIG_EXTEND above)
+       NOTE, cannot be broken out into separate dir -->
+  <CONTROLLER_ACTION_COMMAND xmlns="http://clicon.org/controller-config">/usr/local/bin/clixon_server.py -f /usr/local/etc/clixon/controller.xml</CONTROLLER_ACTION_COMMAND>
+  <CONTROLLER_PYAPI_MODULE_PATH xmlns="http://clicon.org/controller-config">/usr/local/share/controller/modules</CONTROLLER_PYAPI_MODULE_PATH>
+  <CONTROLLER_PYAPI_MODULE_FILTER xmlns="http://clicon.org/controller-config"></CONTROLLER_PYAPI_MODULE_FILTER>
+  <CONTROLLER_PYAPI_PIDFILE xmlns="http://clicon.org/controller-config">/usr/local/var/run/controller/clixon_server.pid</CONTROLLER_PYAPI_PIDFILE>
+</clixon-config>

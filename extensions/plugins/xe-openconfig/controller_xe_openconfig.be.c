@@ -111,7 +111,6 @@ xe_openconfig_modify_recv(device_handle dh,
 {
     int         retval = -1;
     const char *domain;
-    const char *name;
 
     domain = device_handle_domain_get(dh);
     if ((domain == NULL || strcmp(domain, "xe") != 0))
