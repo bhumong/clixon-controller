@@ -53,7 +53,7 @@
 #include "controller_device_handle.h"
 #include "controller_device_send.h"
 
-/*! Send a <lock>/<unlock> target candidate
+/*! Send a <lock>/<unlock> target candidate or running
  *
  * @param[in]  h    Clixon handle
  * @param[in]  dh   Clixon client handle
@@ -87,7 +87,10 @@ device_send_lock(clixon_handle h,
 #else
     cprintf(cb, "<%slock>", lock==0?"un":"");
 #endif
-    cprintf(cb, "<target><candidate/></target>");
+    if (device_handle_supports_candidate(dh))
+        cprintf(cb, "<target><candidate/></target>");
+    else
+        cprintf(cb, "<target><running/></target>");
     cprintf(cb, "</%slock>", lock==0?"un":"");
     cprintf(cb, "</rpc>");
     if (device_handle_framing_type_get(dh) == NETCONF_SSH_CHUNKED){
@@ -434,11 +437,12 @@ device_create_edit_config_diff(clixon_handle h,
                                cbuf        **cbret1,
                                cbuf        **cbret2)
 {
-    int     retval = -1;
-    cbuf   *cb = NULL;
-    int     i;
-    cxobj  *xn;
-    cxobj  *xa;
+    int          retval = -1;
+    const char  *target = NULL;
+    cbuf        *cb = NULL;
+    int          i;
+    cxobj       *xn;
+    cxobj       *xa;
 
     clixon_debug(CLIXON_DBG_CTRL, "");
     /* 1. Add netconf operation attributes to add/del/change nodes in x0 and x1 and mark */
@@ -481,6 +485,7 @@ device_create_edit_config_diff(clixon_handle h,
     if (xml_tree_prune_flagged_sub(x1, XML_FLAG_MARK, 1, NULL) < 0)
         goto done;
     // XXX validate
+    target = device_handle_supports_candidate(dh) ? "candidate" : "running";
     /* 4. Create two edit-config messages and parse them */
     if (dlen) {
         if ((cb = cbuf_new()) == NULL){
@@ -493,7 +498,7 @@ device_create_edit_config_diff(clixon_handle h,
                 device_handle_msg_id_getinc(dh)
                 );
         cprintf(cb, "<edit-config>");
-        cprintf(cb, "<target><candidate/></target>");
+        cprintf(cb, "<target><%s/></target>", target);
         cprintf(cb, "<default-operation>none</default-operation>");
         cprintf(cb, "<config>");
         /* Rewrite x0 */
@@ -518,7 +523,7 @@ device_create_edit_config_diff(clixon_handle h,
                 device_handle_msg_id_getinc(dh)
                 );
         cprintf(cb, "<edit-config>");
-        cprintf(cb, "<target><candidate/></target>");
+        cprintf(cb, "<target><%s/></target>", target);
         cprintf(cb, "<default-operation>%s</default-operation>", NETCONF_EDIT_CONFIG_ADD_DEFAULT_OPERATION);
         /* Rewrite x1 */
         if (clixon_plugin_userdef_all(h, CTRL_NX_SEND, x1, dh) < 0)
@@ -583,12 +588,26 @@ device_send_rpc(clixon_handle h,
 }
 
 /*! Send NETCONF validate to device
+ *
+ * @retval   1  Sent validate
+ * @retval   0  Skipped (not supported)
+ * @retval  -1  Error
  */
 int
 device_send_validate(clixon_handle h,
                      device_handle dh)
 {
-    return device_send_rpc(h, dh, "<validate><source><candidate/></source></validate>");
+    int ret;
+
+    if (!device_handle_supports_candidate(dh))
+        return 0;
+    if (!device_handle_supports_validate(dh))
+        return 0;
+
+    ret = device_send_rpc(h, dh, "<validate><source><candidate/></source></validate>");
+    if (ret == 0)
+        return 1;
+    return ret;
 }
 
 /*! Send commit to device

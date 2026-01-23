@@ -478,6 +478,24 @@ push_device_one(clixon_handle           h,
     /* Note x0 and x1 are directly modified in device_create_edit_config_diff, cannot do no-copy
        1) get previous device synced xml */
     name = device_handle_name_get(dh);
+    if (ct->ct_push_type == PT_VALIDATE){
+        if (!device_handle_supports_candidate(dh)){
+            if ((*cberr = cbuf_new()) == NULL){
+                clixon_err(OE_UNIX, errno, "cbuf_new");
+                goto done;
+            }
+            cprintf(*cberr, "Device %s does not support candidate datastore", name);
+            goto failed;
+        }
+        if (!device_handle_supports_validate(dh)){
+            if ((*cberr = cbuf_new()) == NULL){
+                clixon_err(OE_UNIX, errno, "cbuf_new");
+                goto done;
+            }
+            cprintf(*cberr, "Device %s does not support validate capability", name);
+            goto failed;
+        }
+    }
     if ((ret = device_config_read(h, name, "SYNCED", &x0, cberr)) < 0)
         goto done;
     if (ret == 0)
@@ -528,8 +546,17 @@ push_device_one(clixon_handle           h,
             device_handle_outmsg_set(dh, 1, cbmsg1);
         if (cbmsg2)
             device_handle_outmsg_set(dh, 2, cbmsg2);
-        if (device_send_lock(h, dh, 1) < 0)
-            goto done;
+        if (device_send_lock(h, dh, 1) < 0){
+            if (*cberr == NULL){
+                if ((*cberr = cbuf_new()) == NULL){
+                    clixon_err(OE_UNIX, errno, "cbuf_new");
+                    goto done;
+                }
+            }
+            if (netconf_operation_failed(*cberr, "protocol", "%s", clixon_err_reason()) < 0)
+                goto done;
+            goto failed;
+        }
         device_handle_tid_set(dh, ct->ct_id);
         if (device_state_set(dh, CS_PUSH_LOCK) < 0)
             goto done;

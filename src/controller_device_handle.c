@@ -839,6 +839,26 @@ device_handle_capabilities_find(clixon_handle dh,
     return x?1:0;
 }
 
+int
+device_handle_supports_candidate(device_handle dh)
+{
+    if (device_handle_capabilities_find(dh, NETCONF_CANDIDATE_CAPABILITY))
+        return 1;
+    if (device_handle_capabilities_find(dh, NETCONF_PRIVATE_CANDIDATE_CAPABILITY))
+        return 1;
+    return 0;
+}
+
+int
+device_handle_supports_validate(device_handle dh)
+{
+    if (device_handle_capabilities_find(dh, NETCONF_VALIDATE_CAPABILITY_1_1))
+        return 1;
+    if (device_handle_capabilities_find(dh, NETCONF_VALIDATE_CAPABILITY_1_0))
+        return 1;
+    return 0;
+}
+
 /*! Get RFC 8525 yang-lib as xml tree
  *
  * @param[in]  dh     Device handle
