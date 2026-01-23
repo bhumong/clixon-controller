@@ -1749,8 +1749,31 @@ device_state_handler(clixon_handle h,
         /* 2.2 The transaction is OK
            Proceed to next step */
         if ((cbmsg = device_handle_outmsg_get(dh, 2)) == NULL){
-            if ((ret = device_send_validate(h, dh)) < 0)
-                goto done;
+            ret = device_send_validate(h, dh);
+            if (ret < 0){
+                if (controller_transaction_failed(h, tid, ct, dh, TR_FAILED_DEV_LEAVE,
+                                                 name, clixon_err_reason()) < 0)
+                    goto done;
+                break;
+            }
+            if (ret == 0){
+                if (!device_handle_supports_candidate(dh)){
+                    if (device_send_lock(h, dh, 0) < 0)
+                        goto done;
+                    if (device_state_set(dh, CS_PUSH_UNLOCK) < 0)
+                        goto done;
+                    break;
+                }
+                if (ct->ct_push_type == PT_VALIDATE){
+                    if (controller_transaction_failed(h, tid, ct, dh, TR_FAILED_DEV_IGNORE,
+                                                     name, "Validate capability not supported") < 0)
+                        goto done;
+                    break;
+                }
+                if (device_state_set(dh, CS_PUSH_WAIT) < 0)
+                    goto done;
+                break;
+            }
             if (device_state_set(dh, CS_PUSH_VALIDATE) < 0)
                 goto done;
             break;
@@ -1793,8 +1816,31 @@ device_state_handler(clixon_handle h,
             break;
         /* 2.2 The transaction is OK
            Proceed to next step */
-        if ((ret = device_send_validate(h, dh)) < 0)
-            goto done;
+        ret = device_send_validate(h, dh);
+        if (ret < 0){
+            if (controller_transaction_failed(h, tid, ct, dh, TR_FAILED_DEV_LEAVE,
+                                             name, clixon_err_reason()) < 0)
+                goto done;
+            break;
+        }
+        if (ret == 0){
+            if (!device_handle_supports_candidate(dh)){
+                if (device_send_lock(h, dh, 0) < 0)
+                    goto done;
+                if (device_state_set(dh, CS_PUSH_UNLOCK) < 0)
+                    goto done;
+                break;
+            }
+            if (ct->ct_push_type == PT_VALIDATE){
+                if (controller_transaction_failed(h, tid, ct, dh, TR_FAILED_DEV_IGNORE,
+                                                 name, "Validate capability not supported") < 0)
+                    goto done;
+                break;
+            }
+            if (device_state_set(dh, CS_PUSH_WAIT) < 0)
+                goto done;
+            break;
+        }
         if (device_state_set(dh, CS_PUSH_VALIDATE) < 0)
             goto done;
         break;

@@ -45,6 +45,16 @@
 #define DH_FLAG_NETCONF_BASE10    0x02 /* Configured NETCONF base10 (eom) announcement */
 #define DH_FLAG_NETCONF_BASE11    0x04 /* Configured NETCONF base11 (chunked) announcement */
 
+#ifndef NETCONF_CANDIDATE_CAPABILITY
+#define NETCONF_CANDIDATE_CAPABILITY "urn:ietf:params:netconf:capability:candidate:1.0"
+#endif
+#ifndef NETCONF_VALIDATE_CAPABILITY_1_0
+#define NETCONF_VALIDATE_CAPABILITY_1_0 "urn:ietf:params:netconf:capability:validate:1.0"
+#endif
+#ifndef NETCONF_VALIDATE_CAPABILITY_1_1
+#define NETCONF_VALIDATE_CAPABILITY_1_1 "urn:ietf:params:netconf:capability:validate:1.1"
+#endif
+
 /*
  * Types
  */
@@ -97,6 +107,8 @@ int    device_handle_framing_type_set(device_handle dh, netconf_framing_type ft)
 cxobj *device_handle_capabilities_get(device_handle dh);
 int    device_handle_capabilities_set(device_handle dh, cxobj *xcaps);
 int    device_handle_capabilities_find(clixon_handle ch, const char *name);
+int    device_handle_supports_candidate(device_handle dh);
+int    device_handle_supports_validate(device_handle dh);
 cxobj *device_handle_yang_lib_get(device_handle dh);
 int    device_handle_yang_lib_set(device_handle dh, cxobj *xylib);
 int    device_handle_yang_lib_append(device_handle dh, cxobj *xylib);
