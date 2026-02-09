@@ -36,13 +36,23 @@
 #include <clixon/clixon.h>
 #include <clixon/clixon_options.h>
 #include <clixon/clixon_plugin.h>
+#include <clixon/clixon_xml_nsctx.h>
+#include <clixon/clixon_xpath.h>
 #include <clixon/clixon_yang.h>
+#include <clixon/clixon_yang_module.h>
 
 #include "controller.h"
+#include "controller_lib.h"
+#include "controller_device_state.h"
+#include "controller_device_handle.h"
 
 #define XR_DOMAIN "xr"
 #define YANG_CACHE_ENV "CLICON_YANG_DOMAIN_CACHE"
 #define YANG_CACHE_DEFAULT "/workspace/docker/dev/mounts"
+#define XR_NETCONF_YANG_TAG "netconf-yang"
+#define XR_AGENT_TAG "agent"
+#define XR_NETCONF_YANG_UM_NS "http://cisco.com/ns/yang/Cisco-IOS-XR-um-netconf-yang-cfg"
+#define XR_NETCONF_YANG_MAN_NS "http://cisco.com/ns/yang/Cisco-IOS-XR-man-netconf-cfg"
 
 static int
 has_suffix(const char *str,
@@ -602,6 +612,165 @@ module_is_xr(clixon_handle h,
     return 0;
 }
 
+static cxobj *
+xr_xml_root(cxobj *x)
+{
+    if (x == NULL)
+        return NULL;
+    while (xml_parent(x) != NULL)
+        x = xml_parent(x);
+    return x;
+}
+
+static int
+xr_set_netconf_yang_spec(clixon_handle h,
+                         device_handle dh,
+                         cxobj        *xny,
+                         const char   *ns)
+{
+    yang_stmt *yspec = NULL;
+    yang_stmt *ymod = NULL;
+    yang_stmt *yc = NULL;
+
+    if (h == NULL || dh == NULL || xny == NULL || ns == NULL)
+        return 0;
+    if (controller_mount_yspec_get(h, device_handle_name_get(dh), &yspec) < 0)
+        return -1;
+    if (yspec == NULL)
+        return 0;
+    ymod = yang_find_module_by_namespace(yspec, ns);
+    if (ymod == NULL)
+        return 0;
+    yc = yang_find(ymod, Y_CONTAINER, XR_NETCONF_YANG_TAG);
+    if (yc != NULL)
+        xml_spec_set(xny, yc);
+    return 0;
+}
+
+static int
+xr_fix_netconf_yang_ns(clixon_handle h,
+                       device_handle dh,
+                       cxobj        *xdata,
+                       const char   *ns,
+                       const char   *prefix)
+{
+    int     retval = -1;
+    cvec   *nsc = NULL;
+    cxobj **vec = NULL;
+    size_t  veclen = 0;
+    size_t  i;
+    cxobj  *root;
+
+    if (xdata == NULL || ns == NULL || prefix == NULL)
+        return 0;
+    if ((nsc = xml_nsctx_init(prefix, ns)) == NULL)
+        goto done;
+    if (xpath_vec(xdata, nsc, "//%s:%s", &vec, &veclen, prefix, XR_AGENT_TAG) < 0)
+        goto done;
+    if (veclen == 0){
+        retval = 0;
+        goto done;
+    }
+    root = xr_xml_root(xdata);
+    for (i = 0; i < veclen; i++){
+        cxobj     *agent = vec[i];
+        cxobj     *parent = xml_parent(agent);
+        char       *pns = NULL;
+        int        parent_ok = 0;
+        yang_stmt *yparent;
+        yang_stmt *yc;
+
+        if (parent &&
+            strcmp(xml_name(parent), XR_NETCONF_YANG_TAG) == 0 &&
+            xml2ns(parent, xml_prefix(parent), &pns) == 0 &&
+            pns != NULL && strcmp(pns, ns) == 0){
+            parent_ok = 1;
+        }
+        if (parent_ok){
+            yparent = xml_spec(parent);
+            if (yparent){
+                yc = yang_find_datanode_ns(yparent, XR_AGENT_TAG, ns);
+                if (yc && yc != xml_spec(agent))
+                    xml_spec_set(agent, yc);
+            }
+            continue;
+        }
+        cxobj *target = xpath_first(root, nsc, "//%s:%s", prefix, XR_NETCONF_YANG_TAG);
+        if (target == NULL){
+            if ((target = xml_new(XR_NETCONF_YANG_TAG, root, CX_ELMNT)) == NULL)
+                goto done;
+            if (xmlns_set(target, NULL, ns) < 0)
+                goto done;
+            if (xr_set_netconf_yang_spec(h, dh, target, ns) < 0)
+                goto done;
+        }
+        if (xml_rm(agent) < 0)
+            goto done;
+        if (xml_addsub(target, agent) < 0)
+            goto done;
+        yparent = xml_spec(target);
+        if (yparent){
+            yc = yang_find_datanode_ns(yparent, XR_AGENT_TAG, ns);
+            if (yc && yc != xml_spec(agent))
+                xml_spec_set(agent, yc);
+        }
+    }
+    retval = 0;
+ done:
+    if (vec)
+        free(vec);
+    if (nsc)
+        xml_nsctx_free(nsc);
+    return retval;
+}
+
+static int
+xr_fix_netconf_yang_parent(clixon_handle h,
+                           device_handle dh,
+                           cxobj        *xdata)
+{
+    if (xdata == NULL)
+        return 0;
+    if (xr_fix_netconf_yang_ns(h, dh, xdata, XR_NETCONF_YANG_UM_NS, "xr-um") < 0)
+        return -1;
+    if (xr_fix_netconf_yang_ns(h, dh, xdata, XR_NETCONF_YANG_MAN_NS, "xr-man") < 0)
+        return -1;
+    return 0;
+}
+
+static int
+xr_yang_userdef(clixon_handle h,
+                int           type,
+                cxobj        *xn,
+                void         *arg)
+{
+    int           retval = -1;
+    device_handle dh = (device_handle)arg;
+    const char   *domain = NULL;
+
+    if (xn == NULL || dh == NULL){
+        clixon_err(OE_PLUGIN, EINVAL, "xn or dh is NULL");
+        goto done;
+    }
+    domain = device_handle_domain_get(dh);
+    if (domain == NULL || strcmp(domain, XR_DOMAIN) != 0){
+        retval = 0;
+        goto done;
+    }
+    switch (type){
+    case CTRL_NX_RECV:
+    case CTRL_NX_SEND:
+        if (xr_fix_netconf_yang_parent(h, dh, xn) < 0)
+            goto done;
+        break;
+    default:
+        break;
+    }
+    retval = 0;
+ done:
+    return retval;
+}
+
 struct must_list {
     yang_stmt **items;
     size_t      len;
@@ -694,6 +863,7 @@ xr_yang(clixon_handle h,
 static clixon_plugin_api api = {
     "xr-domain-must-patch",
     .ca_yang_patch = xr_yang,
+    .ca_userdef = xr_yang_userdef,
 };
 
 clixon_plugin_api *
