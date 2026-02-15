@@ -208,12 +208,19 @@ function sleep_open()
 function nacm_init() {
     new "Create default configuration for NACM"
     expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure delete nacm)" 0 ""
+    new "Create default configuration for NACM"
     expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure set nacm enable-nacm true)" 0 ""
+    new "Create default configuration for NACM"
     expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure set nacm read-default permit)" 0 ""
+    new "Create default configuration for NACM"
     expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure set nacm write-default permit)" 0 ""
+    new "Create default configuration for NACM"
     expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure set nacm exec-default permit)" 0 ""
+    new "Create default configuration for NACM"
     expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure set nacm groups group test-group user-name andy)" 0 ""
+    new "Create default configuration for NACM"
     expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure set nacm rule-list test-rules group test-group)" 0 ""
+    new "Create default configuration for NACM"
     expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure commit local)" 0 ""
 }
 
@@ -265,9 +272,13 @@ expectpart "$(curl $CURLOPTS --key $certdir/andy.key --cert $certdir/andy.crt -X
 
 new "Deny access to hostname"
 expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure set nacm rule-list test-rules rule test-rule access-operations \*)" 0 ""
+new "Deny access to hostname"
 expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure set nacm rule-list test-rules rule test-rule action deny)" 0 ""
+new "Deny access to hostname"
 expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure set nacm rule-list test-rules rule test-rule path /ctrl:devices/ctrl:device/ctrl:config/oc-sys:system)" 0 ""
+new "Deny access to hostname"
 expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure commit local)" 0 ""
+new "Deny access to hostname"
 expectpart "$(curl $CURLOPTS --key $certdir/andy.key --cert $certdir/andy.crt -X GET -H "Content-Type: application/yang-data+xml" $RCPROTO://localhost/restconf/data/clixon-controller:devices/device=openconfig1/config/openconfig-system:system/config/hostname)" 0 '.*{"ietf-restconf:errors":{"error":{"error-type":"application","error-tag":"invalid-value","error-severity":"error","error-message":"Instance does not exist"}}}'
 
 new "Create a new service instance"
@@ -275,6 +286,7 @@ expectpart "$(curl $CURLOPTS --key $certdir/andy.key --cert $certdir/andy.crt -X
 
 new "Apply service as Andy, should be denied"
 expectpart "$(curl $CURLOPTS --key $certdir/andy.key --cert $certdir/andy.crt -X POST -H "Content-Type: application/yang-data+json" $RCPROTO://localhost/restconf/operations/clixon-controller:controller-commit -d "${DATA}")" 0 "HTTP/$HVER 200" 'Content-Type: application/yang-data+json'
+new "Apply service as Andy, should be denied"
 expectpart "$($clixon_cli -1 -f $CFG -E $CFD show transactions last)" 0 ".*access denied.*"
 
 new "Apply service again as Bob, should be denied"
@@ -285,9 +297,13 @@ expectpart "$($clixon_cli -1 -f $CFG -E $CFD show transactions last)" 0 ".*SUCCE
 
 new "Permit Andy to run service"
 expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure set nacm rule-list test-rules rule test-rule access-operations \*)" 0 ""
+new "Permit Andy to run service"
 expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure set nacm rule-list test-rules rule test-rule action permit)" 0 ""
+new "Permit Andy to run service"
 expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure set nacm rule-list test-rules rule test-rule path /ctrl:devices/ctrl:device/ctrl:config/oc-sys:system)" 0 ""
+new "Permit Andy to run service"
 expectpart "$($clixon_cli -1 -f $CFG -E $CFD -m configure commit local)" 0 ""
+new "Permit Andy to run service"
 expectpart "$(curl $CURLOPTS --key $certdir/andy.key --cert $certdir/andy.crt -X POST -H "Content-Type: application/yang-data+json" $RCPROTO://localhost/restconf/operations/clixon-controller:controller-commit -d "${DATA}")" 0 "HTTP/$HVER 200" 'Content-Type: application/yang-data+json'
 
 new "Check with cli"
