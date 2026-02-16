@@ -2237,9 +2237,60 @@ devices_statedata(clixon_handle   h,
             goto done;
         cbuf_reset(cb);
     } /* devices */
+    /* Add yang-library state data for each device under config mount point */
+    dh = NULL;
+    while ((dh = device_handle_each(h, dh)) != NULL){
+        cxobj *xyanglib;
+        cxobj *xmodset;
+        cxobj *xmod;
+        char  *mod_name;
+        char  *mod_revision;
+        char  *mod_namespace;
+        char  *modset_name;
+
+        name = device_handle_name_get(dh);
+        xyanglib = device_handle_yang_lib_get(dh);
+        if (xyanglib == NULL)
+            continue;
+        /* Get module-set from yang-library */
+        xmodset = xpath_first(xyanglib, 0, "module-set");
+        if (xmodset == NULL)
+            continue;
+        modset_name = xml_find_body(xmodset, "name");
+        if (modset_name == NULL)
+            continue;
+        /* Output yang-library under /devices/device/config with only standard elements */
+        cprintf(cb, "<devices xmlns=\"%s\"><device><name>%s</name><config>",
+                CONTROLLER_NAMESPACE, name);
+        cprintf(cb, "<yang-library xmlns=\"urn:ietf:params:xml:ns:yang:ietf-yang-library\">");
+        cprintf(cb, "<module-set><name>%s</name>", modset_name);
+        /* Iterate through modules, outputting only standard yang-library elements */
+        xmod = NULL;
+        while ((xmod = xml_child_each(xmodset, xmod, CX_ELMNT)) != NULL) {
+            if (strcmp(xml_name(xmod), "module") != 0)
+                continue;
+            mod_name = xml_find_body(xmod, "name");
+            if (mod_name == NULL)
+                continue;
+            mod_revision = xml_find_body(xmod, "revision");
+            mod_namespace = xml_find_body(xmod, "namespace");
+            cprintf(cb, "<module><name>%s</name>", mod_name);
+            if (mod_revision)
+                cprintf(cb, "<revision>%s</revision>", mod_revision);
+            if (mod_namespace)
+                cprintf(cb, "<namespace>%s</namespace>", mod_namespace);
+            cprintf(cb, "</module>");
+        }
+        cprintf(cb, "</module-set></yang-library>");
+        cprintf(cb, "</config></device></devices>");
+        if (clixon_xml_parse_string(cbuf_get(cb), YB_NONE, NULL, &xstate, NULL) < 0)
+            goto done;
+        cbuf_reset(cb);
+    } /* yang-library */
     retval = 0;
  done:
     if (cb)
         cbuf_free(cb);
     return retval;
 }
+

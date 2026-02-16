@@ -123,12 +123,31 @@ device_send_get(clixon_handle h,
                 int           state,
                 char         *xpath)
 {
-    int   retval = -1;
-    cbuf *cb = NULL;
+    int    retval = -1;
+    cbuf  *cb = NULL;
+    cxobj *xyanglib = NULL;
+    cxobj *xmodule = NULL;
+    char  *filter_ns = NULL;
+    char  *filter_name = NULL;
 
     if ((cb = cbuf_new()) == NULL){
         clixon_err(OE_PLUGIN, errno, "cbuf_new");
         goto done;
+    }
+    /* Check if device has a module-set configured - if so, extract namespace for filter */
+    xyanglib = device_handle_yang_lib_get(dh);
+    if (xyanglib != NULL) {
+        xmodule = xpath_first(xyanglib, 0, "module-set/module");
+        if (xmodule != NULL) {
+            filter_ns = xml_find_body(xmodule, "namespace");
+            /* Use filter-element if configured, otherwise fall back to module name */
+            filter_name = xml_find_body(xmodule, "filter-element");
+            if (filter_name == NULL)
+                filter_name = xml_find_body(xmodule, "name");
+            clixon_debug(CLIXON_DBG_CTRL, "%s: using filter element '%s' with namespace '%s'",
+                         device_handle_name_get(dh), filter_name ? filter_name : "null",
+                         filter_ns ? filter_ns : "null");
+        }
     }
     cprintf(cb, "<rpc xmlns=\"%s\" message-id=\"%" PRIu64 "\">",
             NETCONF_BASE_NAMESPACE,
@@ -137,11 +156,21 @@ device_send_get(clixon_handle h,
         cprintf(cb, "<get>");
         if (xpath)
             cprintf(cb, "<filter type=\"xpath\" select=\"%s\"/>", xpath); // XXX xmlns
+        else if (filter_ns && filter_name) {
+            /* Add subtree filter for devices requiring namespace (e.g., NX-OS) */
+            cprintf(cb, "<filter type=\"subtree\"><%s xmlns=\"%s\"/></filter>",
+                    filter_name, filter_ns);
+        }
         cprintf(cb, "</get>");
     }
     else {
         cprintf(cb, "<get-config>");
         cprintf(cb, "<source><running/></source>");
+        if (filter_ns && filter_name) {
+            /* Add subtree filter for devices requiring namespace (e.g., NX-OS) */
+            cprintf(cb, "<filter type=\"subtree\"><%s xmlns=\"%s\"/></filter>",
+                    filter_name, filter_ns);
+        }
         cprintf(cb, "</get-config>");
     }
     cprintf(cb, "</rpc>");
