@@ -382,11 +382,30 @@ controller_yang_mount(clixon_handle   h,
         }
         if (yanglib){
             if ((xy0 = device_handle_yang_lib_get(dh)) != NULL){
+                cxobj *xmodset;
+                cxobj *xmod;
+                cxobj *xfilter;
+
                 if ((xy1 = xml_new("new", NULL, CX_ELMNT)) == NULL)
                     goto done;
                 /* copy it */
                 if (xml_copy(xy0, xy1) < 0)
                     goto done;
+                /* Remove filter-element nodes (Clixon extension, not in RFC 8525) */
+                xmodset = NULL;
+                while ((xmodset = xml_child_each(xy1, xmodset, CX_ELMNT)) != NULL) {
+                    if (strcmp(xml_name(xmodset), "module-set") != 0)
+                        continue;
+                    xmod = NULL;
+                    while ((xmod = xml_child_each(xmodset, xmod, CX_ELMNT)) != NULL) {
+                        if (strcmp(xml_name(xmod), "module") != 0)
+                            continue;
+                        if ((xfilter = xml_find(xmod, "filter-element")) != NULL){
+                            xml_purge(xfilter);
+                            xmod = NULL; /* restart iteration after removal */
+                        }
+                    }
+                }
                 *yanglib = xy1;
                 xy1 = NULL;
             }

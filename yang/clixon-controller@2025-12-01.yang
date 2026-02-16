@@ -420,6 +420,13 @@ module clixon-controller {
                     description
                         "The XML namespace identifier for this module.";
                 }
+                leaf filter-element {
+                    type string;
+                    description
+                        "Top-level XML element name for NETCONF get-config filter.
+                        Required for devices like Cisco NX-OS.
+                        Example: System for NX-OS devices.";
+                }
             }
         }
         leaf device-domain {
