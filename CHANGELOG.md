@@ -1,10 +1,11 @@
 # Clixon Controller Changelog
 
 ## 1.7.0
-Planned: February 2026
+21 February 2026
 
 ### New features
 
+* Clixon CLI optimization reduces memory consumption if devices have large YANGs
 * Added transaction garbage-collect
   * Keep only a limited nr of transactions structures (default 100)
   * Remove "devices" struct used for device rpc and state replies after timeout (default 300s) 
