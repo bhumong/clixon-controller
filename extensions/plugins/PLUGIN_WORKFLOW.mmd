@@ -1,0 +1,66 @@
+%% Clixon Controller Extensions - Plugin Workflow (Mermaid UML)
+%% Render with Mermaid-enabled Markdown viewer
+
+sequenceDiagram
+    autonumber
+    participant CFG as controller.xml
+    participant B as clixon_backend
+    participant PM as Plugin Manager
+    participant BP as Backend Plugins<br/>(junos-native, xe-openconfig,<br/>xr-yang, nokia-srlinux)
+    participant Y as YANG Parser
+    participant D as Device NETCONF Session
+    participant CP as CLI Plugin<br/>(cli-command)
+    participant SH as OS Shell
+
+    Note over CFG,B: Startup configuration points plugin dirs
+    CFG->>B: CLICON_BACKEND_DIR=/.../controller/backend
+    CFG->>B: CLICON_CLI_DIR=/.../controller/cli
+    B->>PM: load all *.so plugins from plugin dirs
+
+    B->>PM: clixon_plugin_start_all()
+    PM->>BP: call ca_start() if defined
+    Note over BP: Example: nokia-srlinux patches YANG files at startup
+
+    Note over D,Y: When device/domain YANG modules are parsed
+    Y->>PM: clixon_plugin_yang_patch_all(ymod)
+    PM->>BP: call ca_yang_patch(ymod)
+    Note over BP: Example: xr-yang removes invalid must/pattern constructs
+
+    Note over B,D: Push to device (edit-config/send)
+    B->>PM: clixon_plugin_userdef_all(CTRL_NX_SEND,xn,dh)
+    PM->>BP: call ca_userdef SEND
+    BP-->>B: rewritten outgoing XML
+    B->>D: send NETCONF RPC
+
+    Note over D,B: Pull from device (get/get-config/recv)
+    D->>B: NETCONF reply <data>
+    B->>PM: clixon_plugin_userdef_all(CTRL_NX_RECV,xdata,dh)
+    PM->>BP: call ca_userdef RECV
+    BP-->>B: rewritten incoming XML
+
+    Note over CP,SH: CLI plugin path (separate from backend userdef)
+    CP->>SH: execute mapped shell command (fork/execvp)
+    SH-->>CP: exit status/output
+
+
+flowchart TD
+    A[Controller startup] --> B[Read controller.xml]
+    B --> C[Load backend plugins from CLICON_BACKEND_DIR]
+    C --> D[Load CLI plugins from CLICON_CLI_DIR]
+    D --> E[Call ca_start hooks]
+
+    E --> F{Operation type?}
+    F -->|Schema/YANG parse| G[ca_yang_patch on each parsed module]
+    F -->|Device push| H[ca_userdef CTRL_NX_SEND]
+    F -->|Device pull| I[ca_userdef CTRL_NX_RECV]
+    F -->|CLI command| J[CLI plugin callback]
+
+    G --> K[Patched YANG AST / preprocessed files]
+    H --> L[Outgoing XML rewritten]
+    I --> M[Incoming XML rewritten]
+    J --> N[Server-side shell command executed]
+
+    K --> O[Stable schema-mount and validation]
+    L --> P[Device accepts edit-config]
+    M --> Q[Controller ingests non-standard replies]
+    N --> R[CLI returns command result]
