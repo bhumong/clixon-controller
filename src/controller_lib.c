@@ -365,6 +365,7 @@ xdev2yang_library(cxobj  *xmodset,
     char  *name;
     char  *revision;
     char  *namespace;
+    char  *filter_element;
 
     if (domain == NULL){
         clixon_err(OE_YANG, 0, "domain is NULL");
@@ -387,12 +388,15 @@ xdev2yang_library(cxobj  *xmodset,
         }
         revision = xml_find_body(x, "revision");
         namespace = xml_find_body(x, "namespace");
+        filter_element = xml_find_body(x, "filter-element");
         cprintf(cb, "<module>");
         cprintf(cb, "<name>%s</name>", name);
         if (revision)
             cprintf(cb, "<revision>%s</revision>", revision);
         if (namespace)
             cprintf(cb, "<namespace>%s</namespace>", namespace);
+        if (filter_element)
+            cprintf(cb, "<filter-element>%s</filter-element>", filter_element);
         cprintf(cb, "</module>");
     }
     cprintf(cb, "</module-set>");
@@ -401,9 +405,9 @@ xdev2yang_library(cxobj  *xmodset,
     if (clixon_xml_parse_string(cbuf_get(cb), YB_NONE, NULL, xyanglib, NULL) < 0)
         goto done;
     retval = 0;
- done:
-    if (cb)
-        cbuf_free(cb);
+    done:
+       if (cb)
+           cbuf_free(cb);
     return retval;
 }
 
