@@ -1,5 +1,15 @@
 # Clixon Controller Changelog
 
+* [1.8.0](#180) Expected: May 2026
+* [1.7.0](#170) 21 February 2026
+* [1.6.0](#160) 21 November 2025
+* [1.5.0](#150) 29 July 2025
+* [1.4.0](#140) 3 April 2025
+* [1.3.0](#130) 30 January 2025
+* [1.2.0](#120) 28 October 2024
+* [1.1.0](#110) 3 July 2024
+* [1.0.0](#170) 8 March 2024
+
 ## 1.7.0
 21 February 2026
 
@@ -8,7 +18,7 @@
 * Clixon CLI optimization reduces memory consumption if devices have large YANGs
 * Added transaction garbage-collect
   * Keep only a limited nr of transactions structures (default 100)
-  * Remove "devices" struct used for device rpc and state replies after timeout (default 300s) 
+  * Remove "devices" struct used for device rpc and state replies after timeout (default 300s)
 * New `clixon-controller@2025-12-01.yang` revision
   * Added `service-timeout`
   * Added `timestamp0` to transaction
