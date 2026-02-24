@@ -1203,6 +1203,10 @@ commit_push_after_actions(clixon_handle           h,
                     cprintf(cberr, "%s", clixon_err_reason()); // XXX encode
                     ret = 0;
                 }
+                if (ret == 1){
+                    if (xmldb_post_commit(h, ct->ct_client_id) < 0)
+                        goto done;
+                }
                 if (clicon_option_bool(h, "CLICON_AUTOLOCK"))
                     xmldb_unlock(h, candidate);
                 if (ret == 0){ // XXX awkward, cb ->xml->cb
@@ -1615,6 +1619,11 @@ device_error(clixon_handle           h,
 
 /*! Extended commit: trigger actions and device push
  *
+ * Differs from commit local (regular NETCONF commit) in that it can trigger service actions and device push,
+ * and that it can be used without candidate (in which case the source is running)
+ * To find comparison with regular commit, see candidate_commit in:
+ * - device_state_handler for PUSH-VALIDATE
+ * - commit_push_after_action  (if no devices)
  * @param[in]  h       Clixon handle
  * @param[in]  xe      Request: <rpc><xn></rpc>
  * @param[out] cbret   Return xml tree, eg <rpc-reply>..., <rpc-error..
@@ -3825,7 +3834,7 @@ controller_edit_config(clixon_handle h,
     cxobj     *xserv;
     int        ret;
 
-    clixon_debug(CLIXON_DBG_CTRL, "wrapper");
+    clixon_debug(CLIXON_DBG_CTRL, "Find and remove creator attributes and create services/../created structures");
     if ((yspec = clicon_dbspec_yang(h)) == NULL){
         clixon_err(OE_YANG, ENOENT, "No yang spec9");
         goto done;
@@ -3867,7 +3876,7 @@ controller_edit_config(clixon_handle h,
     }
     if (xml_child_nr_type(xserv, CX_ELMNT) == 0)
         goto ok;
-    clixon_debug_xml(CLIXON_DBG_CTRL, xserv, "Objects created in %s-db", target);
+    clixon_debug_xml(CLIXON_DBG_CTRL2, xserv, "Objects created in %s-db", target);
     if ((ret = xmldb_put(h, target, OP_NONE, xconfig, NULL, cbret)) < 0){
         if (netconf_operation_failed(cbret, "protocol", "%s", clixon_err_reason())< 0)
             goto done;
