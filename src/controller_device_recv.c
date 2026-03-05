@@ -634,6 +634,17 @@ device_recv_get_schema(device_handle dh,
         cprintf(cb, "@%s", revision);
     cprintf(cb, ".yang");
     file = cbuf_get(cb);
+    /* Strip carriage return characters (\r) that some devices (eg Huawei)
+     * include in YANG schema content, which cause YANG parser errors
+     */
+    {
+        size_t i, j;
+        for (i = 0, j = 0; i < sz; i++){
+            if (ydec[i] != '\r')
+                ydec[j++] = ydec[i];
+        }
+        sz = j;
+    }
     clixon_debug(CLIXON_DBG_CTRL, "Write yang to %s", file);
     if ((f = fopen(cbuf_get(cb), "w")) == NULL){
         clixon_err(OE_UNIX, errno, "fopen(%s)", file);
