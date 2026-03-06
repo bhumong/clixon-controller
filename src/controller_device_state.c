@@ -450,8 +450,11 @@ device_schemas_mount_parse(clixon_handle h,
                            cxobj        *xyanglib)
 {
     int        retval = -1;
-    yang_stmt *yspec1;
+    yang_stmt *yspec1 = NULL;
+    yang_stmt *ymounts;
+    yang_stmt *ydomain;
     char      *domain;
+    char      *digest = NULL;
     int        ret;
 
     clixon_debug(CLIXON_DBG_CTRL | CLIXON_DBG_DETAIL, "");
@@ -460,16 +463,31 @@ device_schemas_mount_parse(clixon_handle h,
         device_close_connection(dh, "Empty set of YANG modules");
         goto fail;
     }
-    if (controller_mount_yspec_get(h,
-                                   device_handle_name_get(dh),
-                                   &yspec1) < 0)
-        goto done;
-    if (yspec1 == NULL){
-        clixon_err(OE_YANG, 0, "No yang spec");
-        goto done;
-    }
     if ((domain = device_handle_domain_get(dh)) == NULL){
         clixon_err(OE_YANG, 0, "No YANG domain");
+        goto done;
+    }
+    /* Look up yspec by digest to ensure we load modules into the correct yspec
+     * (the one registered by CS_SCHEMA_LIST), not a stale one from the initial
+     * yang_mount callback that may have been created with a different digest.
+     */
+    if (xyanglib_digest(xyanglib, &digest) < 0)
+        goto done;
+    if ((ymounts = clixon_yang_mounts_get(h)) == NULL){
+        clixon_err(OE_YANG, ENOENT, "Top-level yang mounts not found");
+        goto done;
+    }
+    if ((ydomain = yang_find(ymounts, Y_DOMAIN, domain)) != NULL)
+        yspec1 = yang_find(ydomain, Y_SPEC, digest);
+    if (yspec1 == NULL){
+        /* Fallback: try xpath-based lookup */
+        if (controller_mount_yspec_get(h,
+                                       device_handle_name_get(dh),
+                                       &yspec1) < 0)
+            goto done;
+    }
+    if (yspec1 == NULL){
+        clixon_err(OE_YANG, 0, "No yang spec");
         goto done;
     }
     /* Given yang-lib, actual parsing of all modules into yspec */
@@ -482,6 +500,8 @@ device_schemas_mount_parse(clixon_handle h,
     }
     retval = 1;
  done:
+    if (digest)
+        free(digest);
     clixon_debug(CLIXON_DBG_CTRL | CLIXON_DBG_DETAIL, "retval %d", retval);
     return retval;
  fail:
@@ -1367,6 +1387,11 @@ device_state_handler(clixon_handle h,
                                 device_handle_framing_type_get(dh) == NETCONF_SSH_CHUNKED,
                                 device_handle_flag_get(dh, DH_FLAG_PRIVATE_CANDIDATE)) < 0)
             goto done;
+        /* Brief delay after hello to ensure the device processes it before we send RPCs.
+         * Some devices (e.g. Huawei VRP) silently drop RPCs received in the same TCP segment
+         * as the client hello.
+         */
+        usleep(100000); /* 100ms */
         /* The device is OK */
         if (ct->ct_state == TS_RESOLVED && ct->ct_result == TR_SUCCESS){
             clixon_err(OE_XML, 0, "Transaction unexpected SUCCESS state");

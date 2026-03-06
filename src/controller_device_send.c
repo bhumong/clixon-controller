@@ -167,9 +167,39 @@ device_send_get(clixon_handle h,
         cprintf(cb, "<get-config>");
         cprintf(cb, "<source><running/></source>");
         if (filter_ns && filter_name) {
-            /* Add subtree filter for devices requiring namespace (e.g., NX-OS) */
-            cprintf(cb, "<filter type=\"subtree\"><%s xmlns=\"%s\"/></filter>",
-                    filter_name, filter_ns);
+            /* Try to build subtree filter from mounted yspec top-level data nodes.
+             * This finds the actual XML element names (e.g. "ifm" vs "huawei-ifm").
+             * Falls back to filter_name from yang-library if yspec is unavailable.
+             */
+            yang_stmt *yspec1 = NULL;
+            int use_yspec = 0;
+            if (controller_mount_yspec_get(h, device_handle_name_get(dh), &yspec1) == 0
+                && yspec1 != NULL){
+                yang_stmt *ymod = yang_find(yspec1, Y_MODULE, xml_find_body(xmodule, "name"));
+                if (ymod != NULL){
+                    yang_stmt *ych = NULL;
+                    int        inext_ch = 0;
+                    cbuf      *cbf = cbuf_new();
+                    if (cbf){
+                        while ((ych = yn_iter(ymod, &inext_ch)) != NULL){
+                            int kw = yang_keyword_get(ych);
+                            if (kw == Y_CONTAINER || kw == Y_LIST || kw == Y_LEAF || kw == Y_LEAF_LIST){
+                                cprintf(cbf, "<%s xmlns=\"%s\"/>",
+                                        yang_argument_get(ych), filter_ns);
+                                use_yspec++;
+                            }
+                        }
+                        if (use_yspec > 0)
+                            cprintf(cb, "<filter type=\"subtree\">%s</filter>", cbuf_get(cbf));
+                        cbuf_free(cbf);
+                    }
+                }
+            }
+            if (!use_yspec){
+                /* Fallback: use module name or filter-element directly */
+                cprintf(cb, "<filter type=\"subtree\"><%s xmlns=\"%s\"/></filter>",
+                        filter_name, filter_ns);
+            }
         }
         cprintf(cb, "</get-config>");
     }
