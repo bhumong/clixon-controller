@@ -11,9 +11,16 @@ The following plugins exist:
                  Juniper PTX,MX and QFX (possibly others). The plugin rewrites
                  the XML config on pull/sync and push/commit
 
+- nokia-srlinux Backend plugin that strips Nokia SR Linux
+               srl_nokia-ext:if-feature statements in must blocks so
+               schema-mount parsing succeeds.
+
 - cli-command   CLI plugin to run arbitrary shell commands on the server side.
                 The plugin maps CLI commands to shell commands and returns
                 the output as CLI output.
+- xe-openconfig Backend plugin for Cisco XE devices. Removes the OpenConfig
+               ethernet subtree on outgoing edit-config to avoid device-side
+               when-condition failures.
 
 To build and install a plugin, for example junos_native, do:
 
