@@ -641,9 +641,8 @@ controller_cli_yang_mount(clixon_handle   h,
  * Could be used for logging all CLI commands for example, or just mirroring the history file
  * Note this is not exactly the same as the history command file, since it filters equal
  * commands
- * @param[in]  h     CLIgen handle
- * @param[in]  cmd   CLI command. Do not modify or free
- * @param[in]  expanded Expanded/completed command string (all keywords spelled out)
+ * @param[in]  ch    CLIgen handle
+ * @param[in]  cmd   CLI command string from CLIgen. Do not modify or free
  * @param[in]  arg   Argument given when registering
  * @retval     0     OK
  * @retval    -1     Error
@@ -651,17 +650,17 @@ controller_cli_yang_mount(clixon_handle   h,
 static int
 cli_history_cb(cligen_handle ch,
                const char   *cmd,
-               const char   *expanded,
                void         *arg)
 {
     clixon_handle h = arg;
     int           flags;
 
+    (void)ch;
     /* Trick to not echo history to terminal */
     flags = clixon_logflags_get();
     if ((flags & CLIXON_LOG_STDERR) != 0x0)
         clixon_logflags_set(flags & ~CLIXON_LOG_STDERR);
-    clixon_log(h, LOG_INFO, "command(%s): %s", clicon_username_get(h), expanded);
+    clixon_log(h, LOG_INFO, "command(%s): %s", clicon_username_get(h), cmd);
     if ((flags & CLIXON_LOG_STDERR) != 0x0)
         clixon_logflags_set(flags);
     return 0;
