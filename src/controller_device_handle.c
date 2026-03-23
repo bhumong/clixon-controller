@@ -842,6 +842,8 @@ device_handle_capabilities_find(clixon_handle dh,
 int
 device_handle_supports_candidate(device_handle dh)
 {
+    if (device_handle_flag_get(dh, DH_FLAG_SKIP_CANDIDATE))
+        return 0;
     if (device_handle_capabilities_find(dh, NETCONF_CANDIDATE_CAPABILITY))
         return 1;
     if (device_handle_capabilities_find(dh, NETCONF_PRIVATE_CANDIDATE_CAPABILITY))

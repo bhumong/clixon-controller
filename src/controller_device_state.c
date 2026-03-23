@@ -1692,9 +1692,22 @@ device_state_handler(clixon_handle h,
         /* Receive config data, force transient, ie do not commit */
         if ((ret = device_recv_config(h, dh, xmsg, yspec0, rpcname, conn_state, 1, 0)) < 0)
             goto done;
-        /* Compare transient with last sync 0: closed, 1: unequal, 2: is equal */
-        if (ret && (ret = device_config_compare(h, dh, name, ct, &cberr)) < 0)
-            goto done;
+        /* For writable-running (skip-candidate) devices, the device may auto-update
+         * fields (e.g. lldp/system-name mirrors hostname) which causes SYNCED vs
+         * TRANSIENT mismatch. Accept the current device state as the new baseline
+         * by copying TRANSIENT to SYNCED before proceeding with the push.
+         */
+        if (ret && device_handle_flag_get(dh, DH_FLAG_SKIP_CANDIDATE)){
+            clixon_debug(CLIXON_DBG_CTRL, "%s: skip-candidate copying TRANSIENT to SYNCED", name);
+            if (device_config_copy(h, name, "TRANSIENT", "SYNCED") < 0)
+                goto done;
+            ret = 2; /* Treat as equal, proceed with push */
+        }
+        else {
+            /* Compare transient with last sync 0: closed, 1: unequal, 2: is equal */
+            if (ret && (ret = device_config_compare(h, dh, name, ct, &cberr)) < 0)
+                goto done;
+        }
         if (ret == 0){ /* closed */
             if (controller_transaction_failed(h, tid, ct, dh, TR_FAILED_DEV_LEAVE, name, device_handle_logmsg_get(dh)) < 0)
                 goto done;
