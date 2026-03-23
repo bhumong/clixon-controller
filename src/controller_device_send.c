@@ -134,9 +134,11 @@ device_send_get(clixon_handle h,
         clixon_err(OE_PLUGIN, errno, "cbuf_new");
         goto done;
     }
-    /* Check if device has a module-set configured - if so, extract namespace for filter */
+    /* Check if device has a user-configured module-set - if so, extract namespace for filter.
+     * Only apply filter when explicitly configured (DH_FLAG_MODULE_SET_CONFIG),
+     * not for auto-discovered yang-lib from schema discovery. */
     xyanglib = device_handle_yang_lib_get(dh);
-    if (xyanglib != NULL) {
+    if (xyanglib != NULL && device_handle_flag_get(dh, DH_FLAG_MODULE_SET_CONFIG)) {
         xmodule = xpath_first(xyanglib, 0, "module-set/module");
         if (xmodule != NULL) {
             filter_ns = xml_find_body(xmodule, "namespace");
