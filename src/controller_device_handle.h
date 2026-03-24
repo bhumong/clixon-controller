@@ -40,10 +40,11 @@
 /*
  * Constants
  */
-/* Device flags, the configured flags onoy if device announce them */
+/* Device flags, the configured flags only if device announce them */
 #define DH_FLAG_PRIVATE_CANDIDATE 0x01 /* Configured private-candidate announcement*/
 #define DH_FLAG_NETCONF_BASE10    0x02 /* Configured NETCONF base10 (eom) announcement */
 #define DH_FLAG_NETCONF_BASE11    0x04 /* Configured NETCONF base11 (chunked) announcement */
+#define DH_FLAG_YANG_ANNOUNCE_LATEST 0x08 /* If device announces multiple YANGs, 0: use earliest revision, 1: use latest */
 
 #ifndef NETCONF_CANDIDATE_CAPABILITY
 #define NETCONF_CANDIDATE_CAPABILITY "urn:ietf:params:netconf:capability:candidate:1.0"
@@ -97,6 +98,10 @@ int    device_handle_yang_config_set(device_handle dh, char *yfstr);
 int    device_handle_conn_state_set(device_handle dh, conn_state  state);
 int    device_handle_conn_time_get(device_handle dh, struct timeval *t);
 int    device_handle_conn_time_set(device_handle dh, struct timeval *t);
+int    device_handle_sync_time_get(device_handle dh, struct timeval *t);
+int    device_handle_sync_time_set(device_handle dh, struct timeval *t);
+int    device_handle_stable_time_get(device_handle dh, struct timeval *t);
+int    device_handle_stable_time_set(device_handle dh, struct timeval *t);
 int    device_handle_frame_state_get(device_handle dh);
 int    device_handle_frame_state_set(device_handle dh, int state);
 size_t device_handle_frame_size_get(device_handle dh);
@@ -112,8 +117,6 @@ int    device_handle_supports_validate(device_handle dh);
 cxobj *device_handle_yang_lib_get(device_handle dh);
 int    device_handle_yang_lib_set(device_handle dh, cxobj *xylib);
 int    device_handle_yang_lib_append(device_handle dh, cxobj *xylib);
-int    device_handle_sync_time_get(device_handle dh, struct timeval *t);
-int    device_handle_sync_time_set(device_handle dh, struct timeval *t);
 int    device_handle_nr_schemas_get(device_handle dh);
 int    device_handle_nr_schemas_set(device_handle dh, int nr);
 char  *device_handle_schema_name_get(device_handle dh);
@@ -126,6 +129,7 @@ char  *device_handle_domain_get(device_handle dh);
 int    device_handle_domain_set(device_handle dh, char *domain);
 cbuf  *device_handle_outmsg_get(device_handle dh, int nr);
 int    device_handle_outmsg_set(device_handle dh, int nr, cbuf *cb);
+int    device_handle_stats(clixon_handle  h, uint64_t *nrp, size_t *szp);
 
 #ifdef __cplusplus
 }

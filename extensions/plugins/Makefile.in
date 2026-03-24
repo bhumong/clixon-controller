@@ -23,7 +23,7 @@ VPATH       	= @srcdir@
 srcdir  	= @srcdir@
 top_srcdir  	= @top_srcdir@
 
-SUBDIRS  = junos-native cli-command xe-openconfig nokia-srlinux xr-yang
+SUBDIRS  = junos-native cli-command yang-announce-latest xe-openconfig nokia-srlinux xr-yang
 
 .PHONY: all clean depend install $(SUBDIRS)
 

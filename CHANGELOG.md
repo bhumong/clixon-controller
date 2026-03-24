@@ -15,8 +15,15 @@ Expected: May 2026
 
 ### New features
 
+* New: Extension yang-announce-latest
+* Remove old transient or synced datastores at start
+* Changed CLI show transaction output to a table
+* Changed CLI show connections timestamp to last stable state
 * New `clixon-controller@2026-03-01.yang` revision
   * Add rpc get-device-schema
+  * Added device list to transaction state
+  * Added stable-timestamp to device state
+  * Added memory statistics to rpc clixon-stats
 * Added CLI command: `show device yang schema`
 
 ## 1.7.0
