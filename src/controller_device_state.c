@@ -2282,20 +2282,30 @@ devices_statedata(clixon_handle   h,
             goto done;
         cbuf_reset(cb);
     } /* devices */
-    /* Add yang-library state data for each device under config mount point */
+    /* Add yang-library state data for each device under config mount point.
+     * Only for devices whose mounted YANG spec has the yang-library container (RFC 8525).
+     * Devices with only RFC 7895 (ietf-yang-library@2016) have modules-state
+     * but not yang-library, so skip to avoid YANG validation failure. */
     dh = NULL;
     while ((dh = device_handle_each(h, dh)) != NULL){
-        cxobj *xyanglib;
-        cxobj *xmodset;
-        cxobj *xmod;
-        char  *mod_name;
-        char  *mod_revision;
-        char  *mod_namespace;
-        char  *modset_name;
+        cxobj     *xyanglib;
+        cxobj     *xmodset;
+        cxobj     *xmod;
+        char      *mod_name;
+        char      *mod_revision;
+        char      *mod_namespace;
+        char      *modset_name;
+        yang_stmt *yspec1 = NULL;
+        yang_stmt *ylib = NULL;
 
         name = device_handle_name_get(dh);
         xyanglib = device_handle_yang_lib_get(dh);
         if (xyanglib == NULL)
+            continue;
+        /* Skip devices whose YANG spec lacks the yang-library container */
+        if (controller_mount_yspec_get(h, name, &yspec1) < 0 || yspec1 == NULL)
+            continue;
+        if (yang_abs_schema_nodeid(yspec1, "/yanglib:yang-library", &ylib) < 0 || ylib == NULL)
             continue;
         /* Get module-set from yang-library */
         xmodset = xpath_first(xyanglib, 0, "module-set");
