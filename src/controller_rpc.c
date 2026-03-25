@@ -403,9 +403,10 @@ traverse_device_group(clixon_handle h,
     cxobj  *xdev;
     char   *name;
     char   *pattern;
+    int     ix;
 
-    xdev = NULL;
-    while ((xdev = xml_child_each(xdevs, xdev, CX_ELMNT)) != NULL) {
+    ix = 0;
+    while ((xdev = xml_child_iter(xdevs, &ix, CX_ELMNT)) != NULL) {
         name = xml_name(xdev);
         if (strcmp(name, "device-name") == 0){
             if ((pattern = xml_body(xdev)) == NULL)
@@ -918,6 +919,7 @@ controller_actions_diff(clixon_handle           h,
     char   *instance;
     cxobj  *xi;
     cbuf   *cb = NULL;
+    int     ix;
 
     x0s = xpath_first(td->td_src, nsc, "services");
     x1s = xpath_first(td->td_target, nsc, "services");
@@ -932,8 +934,8 @@ controller_actions_diff(clixon_handle           h,
     }
     /* Check deleted */
     if (x0s){
-        xn = NULL;
-        while ((xn = xml_child_each(x0s, xn,  CX_ELMNT)) != NULL){
+        ix = 0;
+        while ((xn = xml_child_iter(x0s, &ix, CX_ELMNT)) != NULL) {
             if (xml_flag(xn, XML_FLAG_CHANGE|XML_FLAG_DEL) == 0)
                 continue;
             if ((xi = getservicekey(xn)) == NULL ||
@@ -950,8 +952,8 @@ controller_actions_diff(clixon_handle           h,
     }
     /* Check added */
     if (x1s){
-        xn = NULL;
-        while ((xn = xml_child_each(x1s, xn,  CX_ELMNT)) != NULL){
+        ix = 0;
+        while ((xn = xml_child_iter(x1s, &ix, CX_ELMNT)) != NULL) {
             if (xml_flag(xn, XML_FLAG_CHANGE|XML_FLAG_ADD) == 0)
                 continue;
             if ((xi = getservicekey(xn)) == NULL ||
@@ -1038,6 +1040,7 @@ strip_service_data_from_device_config(clixon_handle h,
     char   *xpath;
     int     touch = 0;
     cxobj  *xedit = NULL;
+    int     ix;
     int     ret;
 
     /* Get services/created read-only from running_db for reading */
@@ -1058,8 +1061,8 @@ strip_service_data_from_device_config(clixon_handle h,
             if ((xc0 = xpath_first(xt0, NULL, "services/%s/created", cv_name_get(cv))) == NULL)
                 continue;
             /* Read created from read-only running */
-            xp = NULL;
-            while ((xp = xml_child_each(xc0, xp, CX_ELMNT)) != NULL) {
+            ix = 0;
+            while ((xp = xml_child_iter(xc0, &ix, CX_ELMNT)) != NULL) {
                 if (strcmp(xml_name(xp), "path") != 0)
                     continue;
                 if ((xpath = xml_body(xp)) == NULL)
@@ -1090,8 +1093,8 @@ strip_service_data_from_device_config(clixon_handle h,
             goto done;
         for (i=0; i<veclen; i++){
             xc0 = vec[i];
-            xp = NULL;
-            while ((xp = xml_child_each(xc0, xp, CX_ELMNT)) != NULL) {
+            ix = 0;
+            while ((xp = xml_child_iter(xc0, &ix, CX_ELMNT)) != NULL) {
                 if (strcmp(xml_name(xp), "path") != 0)
                     continue;
                 if ((xpath = xml_body(xp)) == NULL)
@@ -1380,7 +1383,7 @@ controller_commit_actions(clixon_handle           h,
             goto done;
 #ifdef XMLDB_ACTION_INMEM
     xmldb_clear(h, "actions");
-    xmldb_volatile_set(de, 1);
+    xmldb_cache_status_set(de, XMLDB_CACHE_INMEM);
 #endif
     if (xmldb_copy(h, candidate, "actions") < 0)
         goto done;
@@ -1443,16 +1446,18 @@ devices_local_change(clixon_handle       h,
     cxobj *xi;
     cvec  *nsc = NULL;
     char  *name;
+    int    ix;
+    int    ixc;
 
     x0d = xpath_first(td->td_src, nsc, "devices");
     x1d = xpath_first(td->td_target, nsc, "devices");
     if (x0d && td->td_dlen){     /* Check deleted */
-        xd = NULL;
-        while ((xd = xml_child_each(x0d, xd,  CX_ELMNT)) != NULL){
+        ix = 0;
+        while ((xd = xml_child_iter(x0d, &ix, CX_ELMNT)) != NULL) {
             if (strcmp(xml_name(xd), "device") != 0)
                 continue;
-            xi = NULL;
-            while ((xi = xml_child_each(xd, xi,  CX_ELMNT)) != NULL){
+            ixc = 0;
+            while ((xi = xml_child_iter(xd, &ixc, CX_ELMNT)) != NULL) {
                 if (strcmp(xml_name(xi), "config") != 0 &&
                     xml_flag(xi, XML_FLAG_DEL) != 0){
                     break;
@@ -1463,12 +1468,12 @@ devices_local_change(clixon_handle       h,
         }
     }
     if (xd==NULL && x1d && (td->td_alen || td->td_clen)){ /* Check added or changed */
-        xd = NULL;
-        while ((xd = xml_child_each(x1d, xd,  CX_ELMNT)) != NULL){
+        ix = 0;
+        while ((xd = xml_child_iter(x1d, &ix, CX_ELMNT)) != NULL) {
             if (strcmp(xml_name(xd), "device") != 0)
                 continue;
-            xi = NULL;
-            while ((xi = xml_child_each(xd, xi,  CX_ELMNT)) != NULL){
+            ixc = 0;
+            while ((xi = xml_child_iter(xd, &ixc, CX_ELMNT)) != NULL) {
                 if (strcmp(xml_name(xi), "config") != 0 &&
                     xml_flag(xi, XML_FLAG_CHANGE|XML_FLAG_ADD) != 0){
                     break;
@@ -2887,13 +2892,14 @@ xvars2cvv(cxobj *xvars,
     char  *name;
     char  *value;
     cvec  *cvv = NULL;
+    int    ix;
 
     if ((cvv = cvec_new(0)) == NULL){
         clixon_err(OE_UNIX, errno, "cvec_new");
         goto done;
     }
-    xv = NULL;
-    while ((xv = xml_child_each(xvars, xv, CX_ELMNT)) != NULL) {
+    ix = 0;
+    while ((xv = xml_child_iter(xvars, &ix, CX_ELMNT)) != NULL) {
         name = xml_find_body(xv, "name");
         value = xml_find_body(xv, "value");
         if (cvec_add_string(cvv, name, value) < 0){
@@ -2952,6 +2958,7 @@ rpc_device_config_template_apply(clixon_handle h,
     yang_stmt    *yspec0;
     yang_stmt    *yspec1;
     char         *candidate = NULL;
+    int           ix;
     int           ret;
 
     clixon_debug(CLIXON_DBG_CTRL, "");
@@ -2986,8 +2993,8 @@ rpc_device_config_template_apply(clixon_handle h,
     xvars = xml_find_type(xe, NULL, "variables", CX_ELMNT);
     xvars0 = xpath_first(xret, nsc, "devices/template[name='%s']/variables", tmplname);
     /* Match actual parameters in xvars with formal paremeters in xvars0 */
-    xv = NULL;
-    while ((xv = xml_child_each(xvars, xv, CX_ELMNT)) != NULL) {
+    ix = 0;
+    while ((xv = xml_child_iter(xvars, &ix, CX_ELMNT)) != NULL) {
         varname = xml_find_body(xv, "name");
         if (xpath_first(xvars0, nsc, "variable[name='%s']", varname) == NULL){
             if (netconf_unknown_element(cbret, "application", varname, "No such template variable")< 0)
@@ -2995,8 +3002,8 @@ rpc_device_config_template_apply(clixon_handle h,
             goto ok;
         }
     }
-    xv = NULL;
-    while ((xv = xml_child_each(xvars0, xv, CX_ELMNT)) != NULL) {
+    ix = 0;
+    while ((xv = xml_child_iter(xvars0, &ix, CX_ELMNT)) != NULL) {
         varname = xml_find_body(xv, "name");
         if (xpath_first(xvars, nsc, "variable[name='%s']", varname) == NULL){
             if (netconf_missing_element(cbret, "application", varname, "Template variable")< 0)
@@ -3161,6 +3168,7 @@ rpc_device_rpc_template_apply(clixon_handle h,
     char                   *devname;
     char                   *pattern;
     device_handle           dh;
+    int                     ix;
     int                     ret;
 
     clixon_debug(CLIXON_DBG_CTRL, "");
@@ -3203,8 +3211,8 @@ rpc_device_rpc_template_apply(clixon_handle h,
     xvars = xml_find_type(xe, NULL, "variables", CX_ELMNT);
 
     /* Match actual parameters in xvars with formal paremeters in xvars0 */
-    xv = NULL;
-    while ((xv = xml_child_each(xvars, xv, CX_ELMNT)) != NULL) {
+    ix = 0;
+    while ((xv = xml_child_iter(xvars, &ix, CX_ELMNT)) != NULL) {
         varname = xml_find_body(xv, "name");
         if (xpath_first(xvars0, nsc, "variable[name='%s']", varname) == NULL){
             if (netconf_unknown_element(cbret, "application", varname, "No such template variable")< 0)
@@ -3212,8 +3220,8 @@ rpc_device_rpc_template_apply(clixon_handle h,
             goto ok;
         }
     }
-    xv = NULL;
-    while ((xv = xml_child_each(xvars0, xv, CX_ELMNT)) != NULL) {
+    ix = 0;
+    while ((xv = xml_child_iter(xvars0, &ix, CX_ELMNT)) != NULL) {
         varname = xml_find_body(xv, "name");
         if (xpath_first(xvars, nsc, "variable[name='%s']", varname) == NULL){
             if (clixon_xml_parse_va(YB_NONE, NULL, &xvars, NULL, "<variable><name>%s</name><value></value></variable>", varname) < 0)
