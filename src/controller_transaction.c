@@ -185,6 +185,7 @@ transaction_devdata_add(clixon_handle           h,
     cxobj     *xerr = NULL;
     cbuf      *cb = NULL;
     cvec      *nsc = NULL;
+    int        ix;
     int        ret;
 
     if (ct->ct_devdata == NULL){
@@ -231,8 +232,8 @@ transaction_devdata_add(clixon_handle           h,
         clixon_err(OE_XML, 0, "devdata not found");
         goto done;
     }
-    xc = NULL;
-    while ((xc = xml_child_each(xmsg, xc, CX_ELMNT)) != NULL) {
+    ix = 0;
+    while ((xc = xml_child_iter(xmsg, &ix, CX_ELMNT)) != NULL) {
         /* get all inherited namespaces and add them after dup and add to new parent */
         if (xml_nsctx_node(xc, &nsc) < 0)
             goto done;
@@ -553,6 +554,8 @@ controller_transaction_free1(controller_transaction *ct)
         free(ct->ct_warning);
     if (ct->ct_sourcedb)
         free(ct->ct_sourcedb);
+    if (ct->ct_devices)
+        cvec_free(ct->ct_devices);
     if (ct->ct_devdata)
         xml_free(ct->ct_devdata);
     free(ct);
@@ -731,6 +734,35 @@ controller_transaction_nr_devices(clixon_handle h,
             nr++;
     }
     return nr;
+}
+
+/*! Add device name to transation struct
+ *
+ * @param[in] ct   Transaction
+ * @param[in] name Device name
+ * @retval    0    OK
+ * @retval   -1    Error
+ */
+int
+controller_transaction_device_add(controller_transaction *ct,
+                                  const char             *name)
+{
+    int retval = -1;
+
+    if (ct->ct_devices == NULL){
+        if ((ct->ct_devices = cvec_new(0)) == NULL){
+            clixon_err(OE_UNIX, errno, "cvec_new");
+            goto done;
+        }
+    }
+    if (cvec_find(ct->ct_devices, name) == NULL)
+        if (cvec_add_string(ct->ct_devices, name, NULL) < 0){
+            clixon_err(OE_UNIX, errno, "cvec_add_string");
+            goto done;
+        }
+    retval = 0;
+ done:
+    return retval;
 }
 
 /*! A controller transaction (device) has failed
@@ -967,8 +999,11 @@ controller_transaction_statedata(clixon_handle   h,
                 xml_chardata_cbuf_append(cb, 0, ct->ct_reason);
                 cprintf(cb, "</reason>");
             }
-            if (ct->ct_devdata){
+            if (ct->ct_devdata || ct->ct_devices){
+                cg_var *cv = NULL;
                 cprintf(cb, "<devices>");
+                while ((cv = cvec_each(ct->ct_devices, cv)) != NULL)
+                    cprintf(cb, "<device>%s</device>", cv_name_get(cv));
                 if (clixon_xml2cbuf1(cb, ct->ct_devdata, 0, 0, NULL, -1, 1, 0, WITHDEFAULTS_REPORT_ALL) < 0)
                     goto done;
                 cprintf(cb, "</devices>");
@@ -1053,4 +1088,60 @@ controller_transaction_periodic(clixon_handle  h)
         } while (ct && ct != ct_list);
     }
     return 0;
+}
+
+/*! Return statistics of transactions
+ *
+ * @param[in]   h        Clixon handle
+ * @param[in]   xml_type XML stats type
+ * @param[out]  nrp      Number of transactions
+ * @param[out]  szp      Size of all transactions
+ * @retval      0        OK
+ * @retval     -1        Error
+ * @see xml_stats
+ */
+int
+controller_transaction_stats(clixon_handle  h,
+                             xml_stats_enum xml_type,
+                             uint64_t      *nrp,
+                             size_t        *szp)
+{
+    int                     retval = -1;
+    controller_transaction *ct_list = NULL;
+    controller_transaction *ct;
+    uint64_t                nr = 0;
+    size_t                  sz = 0;
+
+    clicon_ptr_get(h, "controller-transaction-list", (void**)&ct_list);
+    if ((ct = ct_list) != NULL)
+        do {
+            nr++;
+            sz += sizeof(controller_transaction);
+            if (ct->ct_username)
+                sz += strlen(ct->ct_username)+1;
+            if (ct->ct_sourcedb)
+                sz += strlen(ct->ct_sourcedb)+1;
+            if (ct->ct_description)
+                sz += strlen(ct->ct_description)+1;
+            if (ct->ct_origin)
+                sz += strlen(ct->ct_origin)+1;
+            if (ct->ct_reason)
+                sz += strlen(ct->ct_reason)+1;
+            if (ct->ct_warning)
+                sz += strlen(ct->ct_warning)+1;
+            if (ct->ct_devices)
+                sz += cvec_size(ct->ct_devices)*sizeof(char *);
+            if (ct->ct_devdata){
+                if (xml_stats(ct->ct_devdata, xml_type, NULL, &sz) < 0)
+                    goto done;
+            }
+            ct = NEXTQ(controller_transaction *, ct);
+        } while (ct && ct != ct_list);
+    if (nrp)
+        *nrp += nr;
+    if (szp)
+        *szp += sz;
+    retval = 0;
+ done:
+    return retval;
 }

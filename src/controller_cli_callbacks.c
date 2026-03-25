@@ -122,6 +122,7 @@ rpc_get_yanglib_mount_match(clixon_handle h,
     cxobj     *xerr = NULL;
     cxobj     *xp;
     yang_stmt *yspec;
+    int        ix;
     int        ret;
 
     clixon_debug(CLIXON_DBG_CTRL, "%s", pattern);
@@ -171,8 +172,8 @@ rpc_get_yanglib_mount_match(clixon_handle h,
             clixon_err(OE_FATAL, 0, "No DB_SPEC");
             goto done;
         }
-        xdev = NULL;
-        while ((xdev = xml_child_each(xdevs, xdev, CX_ELMNT)) != NULL) {
+        ix = 0;
+        while ((xdev = xml_child_iter(xdevs, &ix, CX_ELMNT)) != NULL) {
             if ((devname = xml_find_body(xdev, "name")) == NULL ||
                 fnmatch(pattern, devname, 0) == 0){ /* Match */
                 if (yanglib &&
@@ -259,10 +260,12 @@ cli_show_auto_devs(clixon_handle h,
     char            *pattern;
     cxobj           *xdevs = NULL;
     cxobj           *xdev;
+    cxobj           *xdevices;
     char            *devname;
     int              devices = 0;
     cbuf            *api_path_fmt_cb = NULL;    /* xml key format */
     int              i;
+    int              ix;
     int              fromroot = 0;
 
     if (cvec_len(argv) < 2){
@@ -338,8 +341,9 @@ cli_show_auto_devs(clixon_handle h,
                 goto done;
         }
         else {
-            xdev = NULL;
-            while ((xdev = xml_child_each(xml_find(xdevs, "devices"), xdev, CX_ELMNT)) != NULL) {
+            xdevices = xml_find(xdevs, "devices");
+            ix = 0;
+            while ((xdev = xml_child_iter(xdevices, &ix, CX_ELMNT)) != NULL) {
                 if ((devname = xml_find_body(xdev, "name")) == NULL)
                     continue;
                 cv_string_set(cv, devname); /* replace name */
@@ -609,7 +613,7 @@ transaction_notification_poll(clixon_handle       h,
     return retval;
 }
 
-/*! Query backend if transaction exists. call this before polling, optinal get result
+/*! Query backend if transaction exists. call this before polling, optional get result
  *
  * @param[in]  h       Clixon handle
  * @param[in]  tidstr  Transaction id
@@ -625,9 +629,10 @@ transaction_exist(clixon_handle h,
 {
     int    retval = -1;
     cxobj *xn = NULL; /* XML of transactions */
+    cxobj *xtn;
+    cxobj *xdevs;
     cxobj *xerr;
     cvec  *nsc = NULL;
-    cxobj *xdevdata;
     cbuf  *cb = NULL;
 
     if ((nsc = xml_nsctx_init("co", CONTROLLER_NAMESPACE)) == NULL)
@@ -643,10 +648,12 @@ transaction_exist(clixon_handle h,
         clixon_err_netconf(h, OE_XML, 0, xerr, "Get transactions");
         goto done;
     }
-    if (xpath_first(xn, nsc, "transactions/transaction[tid='%s']", tidstr) != NULL){
-        if (devices && (xdevdata = xpath_first(xn, nsc, "transactions/transaction[tid='%s']/devices", tidstr)) != NULL){
-            xml_rm(xdevdata);
-            *devices = xdevdata;
+    if ((xtn = xpath_first(xn, nsc, "transactions/transaction[tid='%s']", tidstr)) != NULL){
+        if (devices && (xdevs = xml_find_type(xtn, NULL, "devices", CX_ELMNT))){
+            if (xml_find_type(xdevs, NULL, "devdata", CX_ELMNT) != NULL){
+                xml_rm(xdevs);
+                *devices = xdevs;
+            }
         }
         retval = 1;
     }
@@ -1202,11 +1209,12 @@ show_connections_pretty(clixon_handle h,
     char   *state;
     char   *logmsg;
     char   *p;
+    int     ix;
     int     i;
 
     /* First run to see if no matches */
-    xc = NULL;
-    while ((xc = xml_child_each(xn, xc, CX_ELMNT)) != NULL) {
+    ix = 0;
+    while ((xc = xml_child_iter(xn, &ix, CX_ELMNT)) != NULL) {
         if (strcmp(xml_name(xc), "device") != 0)
             continue;
         name = xml_find_body(xc, "name");
@@ -1226,8 +1234,8 @@ show_connections_pretty(clixon_handle h,
     for (i=0; i<width; i++)
         cligen_output(stdout, "=");
     cligen_output(stdout, "\n");
-    xc = NULL;
-    while ((xc = xml_child_each(xn, xc, CX_ELMNT)) != NULL) {
+    ix = 0;
+    while ((xc = xml_child_iter(xn, &ix, CX_ELMNT)) != NULL) {
         if (strcmp(xml_name(xc), "device") != 0)
             continue;
         name = xml_find_body(xc, "name");
@@ -1244,7 +1252,7 @@ show_connections_pretty(clixon_handle h,
         cligen_output(stdout, "%-24s",  name);
         state = xml_find_body(xc, "conn-state");
         cligen_output(stdout, "%-11s",  state?state:"");
-        if ((timestamp = xml_find_body(xc, "conn-state-timestamp")) != NULL){
+        if ((timestamp = xml_find_body(xc, "stable-timestamp")) != NULL){
             /* Remove 6 us digits */
             if ((p = rindex(timestamp, '.')) != NULL)
                 *p = '\0';
@@ -1285,6 +1293,8 @@ show_connections_detail(clixon_handle h,
     char            *name;
     enum format_enum format;
     char            *formatstr;
+    int              ix;
+    int              ixc;
     int              ret;
 
     formatstr = clicon_option_str(h, "CLICON_CLI_OUTPUT_FORMAT");
@@ -1293,8 +1303,8 @@ show_connections_detail(clixon_handle h,
         goto done;
     }
     format = ret;
-    xc = NULL;
-    while ((xc = xml_child_each(xn, xc, CX_ELMNT)) != NULL) {
+    ix = 0;
+    while ((xc = xml_child_iter(xn, &ix, CX_ELMNT)) != NULL) {
         if (strcmp(xml_name(xc), "device") != 0)
             continue;
         name = xml_find_body(xc, "name");
@@ -1302,8 +1312,8 @@ show_connections_detail(clixon_handle h,
             continue;
         if ((xs = xml_find(xc, "name")) != NULL)
             xml_flag_set(xs, XML_FLAG_MARK);
-        xs = NULL;
-        while ((xs = xml_child_each(xc, xs, CX_ELMNT)) != NULL) {
+        ixc = 0;
+        while ((xs = xml_child_iter(xc, &ixc, CX_ELMNT)) != NULL) {
             if (strcmp(xml_name(xs), "capabilities") == 0) /* Too much output */
                 continue;
             if ((ys = xml_spec(xs)) != NULL){
@@ -1393,7 +1403,7 @@ cli_show_connections(clixon_handle h,
     else{
         /* Avoid including moint-point which triggers a lot of extra traffic */
         if (clicon_rpc_get(h,
-                           "co:devices/co:device/co:name | co:devices/co:device/co:conn-state | co:devices/co:device/co:conn-state-timestamp | co:devices/co:device/co:logmsg",
+                           "co:devices/co:device/co:name | co:devices/co:device/co:conn-state | co:devices/co:device/co:stable-timestamp | co:devices/co:device/co:logmsg",
                            nsc, CONTENT_ALL, -1, "explicit", &xn) < 0)
             goto done;
     }
@@ -1489,11 +1499,89 @@ cli_show_services_process(clixon_handle h,
     return retval;
 }
 
+/*! Show one transaction
+ *
+ * @param[in]  xc  XML transaction
+ */
+static int
+show_transaction_one(cxobj *xc)
+{
+    int            retval = -1;
+    cbuf          *cb = NULL;
+    char          *tid;
+    char          *description;
+    char          *state;
+    char          *result;
+    char          *reason;
+    char          *timestamp0;
+    char          *timestamp;
+    char           desc_truncated[41] = {0,};
+    char           duration_str[26] = {0,};
+    struct timeval tv0;
+    struct timeval tv1;
+    struct timeval tvdiff;
+
+    tid = xml_find_body(xc, "tid");
+    description = xml_find_body(xc, "description");
+    state = xml_find_body(xc, "state");
+    result = xml_find_body(xc, "result");
+    reason = xml_find_body(xc, "reason");
+    timestamp0 = xml_find_body(xc, "timestamp0");
+    timestamp = xml_find_body(xc, "timestamp");
+    /* Truncate description to 40 chars */
+    if (description){
+        strncpy(desc_truncated, description, sizeof(desc_truncated)-1);
+    }
+    else
+        strcpy(desc_truncated, "-");
+    /* Calculate duration */
+    if (timestamp0 && timestamp){
+        if (str2time(timestamp0, &tv0) == 0 &&
+            str2time(timestamp, &tv1) == 0){
+            timersub(&tv1, &tv0, &tvdiff);
+            snprintf(duration_str, sizeof(duration_str)-1, "%5ld.%03lds",
+                     tvdiff.tv_sec%10000, tvdiff.tv_usec/1000);
+        }
+        else
+            strcpy(duration_str, "-");
+    }
+    else
+        strcpy(duration_str, "-");
+        /* Calculate duration */
+    if ((cb = cbuf_new()) == NULL){
+        clixon_err(OE_UNIX, errno, "cbuf_new");
+        goto done;
+    }
+    if (timestamp0 && timestamp){
+        if (str2time(timestamp0, &tv0) == 0 &&
+            str2time(timestamp, &tv1) == 0){
+            timersub(&tv1, &tv0, &tvdiff);
+            cprintf(cb, "%ld.%03ld", tvdiff.tv_sec%10000, tvdiff.tv_usec/1000);
+        }
+        else
+            cprintf(cb, "-");
+    }
+    else
+        cprintf(cb, "-");
+    cligen_output(stdout, "%7s %-40s %-10s %-10s %10s %s\n",
+                  tid?tid:"-",
+                  desc_truncated,
+                  state?state:"-",
+                  result?result:"-",
+                  cbuf_get(cb),
+                  reason?reason:"-");
+    retval = 0;
+ done:
+    if (cb)
+        cbuf_free(cb);
+    return retval;
+}
+
 /*! Show controller device states
  *
  * @param[in] h
- * @param[in] cvv
- * @param[in] argv : "last" or "all"
+ * @param[in] cvv  Keywords could be "detail", "all"
+ * @param[in] argv
  * @retval    0    OK
  * @retval   -1    Error
  */
@@ -1505,25 +1593,16 @@ cli_show_transactions(clixon_handle h,
     int                retval = -1;
     cvec              *nsc = NULL;
     cxobj             *xc;
+    cxobj             *xt;
     cxobj             *xerr;
-    cbuf              *cb = NULL;
     cxobj             *xn = NULL; /* XML of transactions */
-    cg_var            *cv;
-    int                all = 0;
+    int                all;
+    int                detail;
+    int                nr;
+    int                i;
 
-    if (argv == NULL || cvec_len(argv) != 1){
-        clixon_err(OE_PLUGIN, EINVAL, "requires argument: <operation>");
-        goto done;
-    }
-    if ((cv = cvec_i(argv, 0)) == NULL){
-        clixon_err(OE_PLUGIN, 0, "Error when accessing argument <all>");
-        goto done;
-    }
-    all = strcmp(cv_string_get(cv), "all")==0;
-    if ((cb = cbuf_new()) == NULL){
-        clixon_err(OE_PLUGIN, errno, "cbuf_new");
-        goto done;
-    }
+    all = cvec_find(cvv, "all") != NULL;
+    detail = cvec_find(cvv, "detail") != NULL;
     /* Get config */
     if ((nsc = xml_nsctx_init("co", CONTROLLER_NAMESPACE)) == NULL)
         goto done;
@@ -1533,23 +1612,52 @@ cli_show_transactions(clixon_handle h,
         clixon_err_netconf(h, OE_XML, 0, xerr, "Get transactions");
         goto done;
     }
-    /* Change top from "data" to "devices" */
+    /* Change top from "data" to "transactions" */
     if ((xc = xml_find_type(xn, NULL, "transactions", CX_ELMNT)) != NULL){
         if (xml_rootchild_node(xn, xc) < 0)
             goto done;
         xn = xc;
-        if (all){
-            xn = xc;
-            xc = NULL;
-            while ((xc = xml_child_each(xn, xc, CX_ELMNT)) != NULL) {
-                if (clixon_xml2file(stdout, xc, 0, 1, NULL, cligen_output, 0, 1) < 0)
-                    goto done;
+        if (detail){
+            /* Detail mode: show full XML */
+            if (all){
+                nr = xml_child_nr_type(xn, CX_ELMNT);
+                for (i = nr; i > 0; i--){
+                    if ((xc = xml_child_i(xn, i)) != NULL){
+                        if (clixon_xml2file(stdout, xc, 0, 1, NULL, cligen_output, 0, 1) < 0)
+                            goto done;
+                    }
+                }
+            }
+            else{
+                if ((xc = xml_child_i(xn, xml_child_nr(xn) - 1)) != NULL){
+                    if (clixon_xml2file(stdout, xc, 0, 1, NULL, cligen_output, 0, 1) < 0)
+                        goto done;
+                }
             }
         }
         else{
-            if ((xc = xml_child_i(xn, xml_child_nr(xn) - 1)) != NULL){
-                if (clixon_xml2file(stdout, xc, 0, 1, NULL, cligen_output, 0, 1) < 0)
-                    goto done;
+            /* Brief mode: show table */
+            cligen_output(stdout, "%7s %-40s %-10s %-10s %12s %s\n",
+                          "TID", "Description", "State", "Result", "Time[s]", "Reason");
+            cligen_output(stdout, "%7s %-40s %-10s %-10s %10s %s\n",
+                          "-------", "----------------------------------------",
+                          "----------", "----------", "------------",
+                          "------------------------------");
+
+            if (all){
+                nr = xml_child_nr_type(xn, CX_ELMNT);
+                for (i = nr; i > 0; i--){
+                    if ((xc = xml_child_i(xn, i)) != NULL){
+                        if (show_transaction_one(xc) < 0)
+                            goto done;
+                    }
+                }
+            }
+            else{
+                if ((xt = xml_child_i(xn, xml_child_nr(xn) - 1)) != NULL){
+                    if (show_transaction_one(xt) < 0)
+                        goto done;
+                }
             }
         }
     }
@@ -1559,8 +1667,6 @@ cli_show_transactions(clixon_handle h,
         cvec_free(nsc);
     if (xn)
         xml_free(xn);
-    if (cb)
-        cbuf_free(cb);
     return retval;
 }
 
@@ -2079,11 +2185,13 @@ cli_dbxml_devs(clixon_handle       h,
     char      *pattern;
     cxobj     *xdevs = NULL;
     cxobj     *xdev;
+    cxobj     *xdevices;
     char      *devname;
     int        devices = 0;
     char      *str;
     cbuf      *api_path_fmt_cb = NULL;    /* xml key format */
     int        i;
+    int        ix;
 
     if (cvec_len(argv) < 1){
         clixon_err(OE_PLUGIN, EINVAL, "Requires first element to be xml key format string");
@@ -2131,8 +2239,9 @@ cli_dbxml_devs(clixon_handle       h,
                 goto done;
         }
         else {
-            xdev = NULL;
-            while ((xdev = xml_child_each(xml_find(xdevs, "devices"), xdev, CX_ELMNT)) != NULL) {
+            xdevices = xml_find(xdevs, "devices");
+            ix = 0;
+            while ((xdev = xml_child_iter(xdevices, &ix, CX_ELMNT)) != NULL) {
                 if ((devname = xml_find_body(xdev, "name")) == NULL)
                     continue;
                 cv_string_set(cv, devname); /* replace name */
@@ -2369,103 +2478,6 @@ cli_controller_show_version(clixon_handle h,
     return 0;
 }
 
-/*! show yang revisions of top-level / mountpoint.
- *
- * @param[in]  h     Clixon handle
- * @param[in]  cvv   Vector of command variables
- * @param[in]  argv  Name of cv containing name of top-level/mountpoint
- * @retval     0     OK
- * @retval    -1     Error
- */
-int
-show_yang_revisions(clixon_handle h,
-                    cvec         *cvv,
-                    cvec         *argv)
-{
-    int        retval = -1;
-    char      *cvname = NULL;
-    char      *name = NULL;
-    char      *name1;
-    char      *module;
-    char      *revision;
-    cg_var    *cv;
-    cxobj     *xt = NULL;
-    cxobj     *xerr;
-    cxobj     *xmodset;
-    cxobj     *x;
-    cvec      *nsc = NULL;
-    cbuf      *cb = NULL;
-    cxobj    **vec = NULL;
-    size_t     veclen;
-    int        i;
-
-    if (cvec_len(argv) > 0 &&
-        (cvname = cv_string_get(cvec_i(argv, 0))) != NULL) {
-        if ((cv = cvec_find(cvv, cvname)) != NULL){
-            if ((name = cv_string_get(cv)) == NULL){
-                clixon_err(OE_PLUGIN, EINVAL, "cv name is empty");
-                goto done;
-            }
-        }
-    }
-    if (name == NULL || (strcmp(name, "top") != 0 && strcmp(name, "config") != 0)) {
-        if ((cb = cbuf_new()) == NULL){
-            clixon_err(OE_UNIX, errno, "cbuf_new");
-            goto done;
-        }
-        if ((nsc = xml_nsctx_init(NULL, CONTROLLER_NAMESPACE)) == NULL)
-            goto done;
-        if (xml_nsctx_add(nsc, "yanglib", "urn:ietf:params:xml:ns:yang:ietf-yang-library") < 0)
-            goto done;
-        /* XXX: cannot access yanglib:yang-library/yanglib:module-set directly */
-        if (name)
-            cprintf(cb, "/devices/device[name='%s']/config", name);
-        else
-            cprintf(cb, "/devices/device/config");
-        if (clicon_rpc_get(h, cbuf_get(cb), nsc, CONTENT_ALL, -1, "explicit", &xt) < 0)
-            goto done;
-        if ((xerr = xpath_first(xt, NULL, "/rpc-error")) != NULL){
-            clixon_err_netconf(h, OE_NETCONF, 0, xerr, "Get configuration");
-            goto done;
-        }
-        cprintf(cb, "/yanglib:yang-library/yanglib:module-set");
-        if (xpath_vec(xt, nsc, "%s", &vec, &veclen, cbuf_get(cb)) < 0)
-            goto done;
-        for (i=0; i<veclen; i++){
-            xmodset = vec[i];
-            name1 = xml_find_body(xml_parent(xml_parent(xml_parent(xmodset))), "name");
-            if (name && strcmp(name, name1))
-                continue;
-            cligen_output(stdout, "%s:\n", name1);
-            x = NULL;
-            while ((x = xml_child_each(xmodset, x, CX_ELMNT)) != NULL){
-                if (strcmp(xml_name(x), "module") != 0)
-                    continue;
-                module = xml_find_body(x, "name");
-                revision = xml_find_body(x, "revision");
-                //            namespace = xml_find_body(x, "namespace");
-                if (revision)
-                    cligen_output(stdout, "%s@%s\n", module, revision);
-                else
-                    cligen_output(stdout, "%s\n", module);
-            }
-            if (name == NULL && i<veclen-1)
-                cligen_output(stdout, "\n");
-        }
-    }
-    retval = 0;
- done:
-    if (vec)
-        free(vec);
-    if (cb)
-        cbuf_get(cb);
-    if (nsc)
-        cvec_free(nsc);
-    if (xt)
-        xml_free(xt);
-    return retval;
-}
-
 /*! show device capabilities, subset of state / hello
  *
  * @param[in]  h     Clixon handle
@@ -2531,6 +2543,136 @@ show_device_capability(clixon_handle h,
         cvec_free(nsc);
     if (xt)
         xml_free(xt);
+    return retval;
+}
+
+/*! Show YANG schemas stored on the controller for a device
+ *
+ * Sends get-device-schema RPC to backend.
+ * If module name given: prints schema content.
+ * If no module name: lists all schemas (identifier@revision).
+ * @param[in]  h     Clixon handle
+ * @param[in]  cvv   Vector of command variables (name, module)
+ * @param[in]  argv  argv[0]: cv name for device pattern (optional, default "*")
+ *                   argv[1]: detail flag value (optional, default false)
+ *                   argv[2]: cv name for module identifier (optional)
+ * @retval     0     OK
+ * @retval    -1     Error
+ */
+int
+cli_show_device_schema(clixon_handle h,
+                       cvec         *cvv,
+                       cvec         *argv)
+{
+    int     retval = -1;
+    char   *cvname;
+    char   *devpattern = "*"; /* devices */
+    char   *str;
+    char   *module = NULL;
+    cg_var *cv;
+    cbuf   *cb = NULL;
+    cxobj  *xtop = NULL;
+    cxobj  *xrpc;
+    cxobj  *xret = NULL;
+    cxobj  *xreply;
+    cxobj  *xerr;
+    cxobj  *xschema;
+    char   *modname;
+    char   *modrev;
+    char   *ns;
+    char   *data;
+    char   *group = NULL;
+    int     detail = 0;
+    int     ix;
+
+    if (cvec_len(argv) > 0 &&
+        (cvname = cv_string_get(cvec_i(argv, 0))) != NULL){
+        if ((cv = cvec_find(cvv, cvname)) != NULL)
+            devpattern = cv_string_get(cv);
+    }
+    if (cvec_len(argv) > 1 &&
+        (str = cv_string_get(cvec_i(argv, 1))) != NULL){
+        detail = strcmp(str, "true") == 0;
+    }
+    if (cvec_len(argv) > 2 &&
+        (cvname = cv_string_get(cvec_i(argv, 2))) != NULL){
+        if ((cv = cvec_find(cvv, cvname)) != NULL)
+            module = cv_string_get(cv);
+    }
+    if ((cv = cvec_find(cvv, "group")) != NULL)
+        group = cv_string_get(cv);
+    if ((cb = cbuf_new()) == NULL){
+        clixon_err(OE_PLUGIN, errno, "cbuf_new");
+        goto done;
+    }
+    cprintf(cb, "<rpc xmlns=\"%s\" username=\"%s\" %s>",
+            NETCONF_BASE_NAMESPACE,
+            clicon_username_get(h),
+            NETCONF_MESSAGE_ID_ATTR);
+    cprintf(cb, "<get-device-schema xmlns=\"%s\">", CONTROLLER_NAMESPACE);
+    if (group != NULL)
+        cprintf(cb, "<device-group>%s</device-group>", devpattern);
+    else
+        cprintf(cb, "<device>%s</device>", devpattern);
+    if (module)
+        cprintf(cb, "<name>%s</name>", module);
+    if (detail)
+        cprintf(cb, "<detail>true</detail>");
+    cprintf(cb, "</get-device-schema>");
+    cprintf(cb, "</rpc>");
+    if (clixon_xml_parse_string(cbuf_get(cb), YB_NONE, NULL, &xtop, NULL) < 0)
+        goto done;
+    xrpc = xml_child_i(xtop, 0);
+    if (clicon_rpc_netconf_xml(h, xrpc, &xret, NULL) < 0)
+        goto done;
+    if ((xreply = xpath_first(xret, NULL, "rpc-reply")) == NULL){
+        clixon_err(OE_CFG, 0, "Malformed rpc reply");
+        goto done;
+    }
+    if ((xerr = xpath_first(xreply, NULL, "rpc-error")) != NULL){
+        clixon_err_netconf(h, OE_XML, 0, xerr, "get-device-schema");
+        goto done;
+    }
+    ix = 0;
+    while ((xschema = xml_child_iter(xreply, &ix, CX_ELMNT)) != NULL) {
+        if (strcmp(xml_name(xschema), "schema") != 0)
+            continue;
+        modname = xml_find_body(xschema, "name");
+        modrev = xml_find_body(xschema, "revision");
+        ns = xml_find_body(xschema, "namespace");
+        data = xml_find_body(xschema, "data");
+        if (data){
+            /* Print schema content */
+            if (strncmp(data, "<![CDATA[", strlen("<![CDATA[")) == 0){
+                /* Remove CDATA */
+                char *start = data + strlen("<![CDATA[");
+                char *end = strstr(start, "]]>");
+                if (end)
+                    *end = '\0';
+                cligen_output(stdout, "%s", start);
+            }
+            else
+                cligen_output(stdout, "%s", data);
+        }
+        else{
+            /* List mode */
+            if (modname && modrev && strlen(modrev) > 0)
+                cligen_output(stdout, "%-40s %s", modname, modrev);
+            else if (modname)
+                cligen_output(stdout, "%s", modname);
+            if (ns)
+                cligen_output(stdout, "  %s", ns);
+            cligen_output(stdout, "\n");
+        }
+    }
+    retval = 0;
+ done:
+    if (cb)
+        cbuf_free(cb);
+    if (xret)
+        xml_free(xret);
+    if (xtop)
+        xml_free(xtop);
     return retval;
 }
 
@@ -2882,11 +3024,13 @@ cli_generic_rpc_match(clixon_handle h,
     char      *rpcpattern = "*";
     cxobj     *xdevs0 = NULL;
     cxobj     *xdev0;
+    cxobj     *xdevices0;
     cxobj     *xdevs1 = NULL;
     cxobj     *xdevc;
     int        yang = 0;
     int        inext;
     int        inext1;
+    int        ix;
     yang_stmt *ymod;
     yang_stmt *yrpc;
     yang_stmt *yspec1;
@@ -2924,8 +3068,9 @@ cli_generic_rpc_match(clixon_handle h,
         clixon_err(OE_PLUGIN, errno, "cbuf_new");
         goto done;
     }
-    xdev0 = NULL;
-    while ((xdev0 = xml_child_each(xml_find(xdevs0, "devices"), xdev0, CX_ELMNT)) != NULL) {
+    xdevices0 = xml_find(xdevs0, "devices");
+    ix = 0;
+    while ((xdev0 = xml_child_iter(xdevices0, &ix, CX_ELMNT)) != NULL) {
         if ((devname = xml_find_body(xdev0, "name")) == NULL)
             continue;
         if (devpattern != NULL && fnmatch(devpattern, devname, 0) != 0)

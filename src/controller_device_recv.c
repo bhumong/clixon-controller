@@ -388,13 +388,17 @@ device_recv_config(clixon_handle h,
 
 /*! Remove duplicate schemas from yang-library
  *
- * Assume sorted
+ * Remove duplicates from yang-library, ie. modules with same name but different revision.
+ * If DH_FLAG_YANG_ANNOUNCE_LATEST is set, keep the one with the newest revision
+ * Assume xyanglib is sorted
+ * @param[in]  dh        Device handle
  * @param[in]  xyanglib  XML tree of yang-library
  * @retval     0         OK
  * @retval    -1         Error
  */
 static int
-xyanglib_dup_rm(cxobj *xyanglib)
+xyanglib_dup_rm(device_handle dh,
+                cxobj        *xyanglib)
 {
     int    retval = -1;
     cxobj *x;
@@ -404,10 +408,12 @@ xyanglib_dup_rm(cxobj *xyanglib)
     char  *prevname;
     char  *rev;
     char  *prevrev;
+    int    cmp;
+    int    ix;
 
     if ((xms = xml_find_type(xyanglib, NULL, "module-set", CX_ELMNT)) != NULL){
-        x = NULL;
-        while ((x = xml_child_each(xms , x, CX_ELMNT)) != NULL) {
+        ix = 0;
+        while ((x = xml_child_iter(xms, &ix, CX_ELMNT)) != NULL) {
             if (strcmp(xml_name(x), "module") != 0)
                 continue;
             name = xml_find_body(x, "name");
@@ -416,12 +422,17 @@ xyanglib_dup_rm(cxobj *xyanglib)
                 prevname = xml_find_body(xprev, "name");
                 prevrev = xml_find_body(xprev, "revision");
                 if (prevname && prevrev && strcmp(name, prevname) == 0){
-                    if (strcmp(rev, prevrev) < 0){ // XXX strcmp date !
-                        /* Older revision, mark for removal */
+                    cmp = strcmp(rev, prevrev);
+                    if (device_handle_flag_get(dh, DH_FLAG_YANG_ANNOUNCE_LATEST))
+                        cmp = -cmp;
+                    if (cmp > 0){
+                        clixon_debug(CLIXON_DBG_CTRL, "Removing duplicate newer yang module %s@%s, keeping older %s@%s",
+                                     name, rev, prevname, prevrev);
                         xml_flag_set(x, XML_FLAG_MARK);
                     }
                     else{
-                        /* Newer revision, mark previous for removal */
+                        clixon_debug(CLIXON_DBG_CTRL, "Keeping duplicate newer yang module %s@%s, removing older %s@%s",
+                                     name, rev, prevname, prevrev);
                         xml_flag_set(xprev, XML_FLAG_MARK);
                     }
                 }
@@ -462,6 +473,7 @@ device_recv_schema_list(device_handle dh,
     cxobj        *xyanglib = NULL;
     clixon_handle h;
     cbuf         *cb = NULL;
+    int           ix;
     int           ret;
 
     clixon_debug(CLIXON_DBG_CTRL | CLIXON_DBG_DETAIL, "");
@@ -492,8 +504,8 @@ device_recv_schema_list(device_handle dh,
     /* "Wash" it from other elements: eg. junos may sneak in errors
      * XXX Maybe this can be skipped ?
      */
-    x = NULL;
-    while ((x = xml_child_each(xschemas, x, CX_ELMNT)) != NULL) {
+    ix = 0;
+    while ((x = xml_child_iter(xschemas, &ix, CX_ELMNT)) != NULL) {
         if (strcmp(xml_name(x), "schema") != 0)
             xml_flag_set(x, XML_FLAG_MARK);
     }
@@ -505,7 +517,7 @@ device_recv_schema_list(device_handle dh,
     if (xml_rootchild(xyanglib, 0, &xyanglib) < 0)
         goto done;
     xml_sort_recurse(xyanglib);
-    if (xyanglib_dup_rm(xyanglib) < 0)
+    if (xyanglib_dup_rm(dh, xyanglib) < 0)
         goto done;
     /* @see controller_connect where initial yangs may be set */
     if (device_handle_yang_lib_append(dh, xyanglib) < 0) /* xyanglib consumed */
@@ -674,17 +686,18 @@ device_recv_check_errors(clixon_handle h,
                          conn_state    conn_state,
                          cbuf        **cberr)
 {
-    int                      retval = -1;
-    cxobj                   *xerr;
-    cxobj                   *x;
-    char                    *b;
+    int                     retval = -1;
+    cxobj                  *xerr;
+    cxobj                  *x;
+    char                   *b;
     uint64_t                tid;
     cbuf                   *cb = NULL;
     controller_transaction *ct;
+    int                     ix;
 
     /* Loop through all replies, if error stop, if only warning continue */
-    xerr = NULL;
-    while ((xerr = xml_child_each(xmsg, xerr, CX_ELMNT)) != NULL) {
+    ix = 0;
+    while ((xerr = xml_child_iter(xmsg, &ix, CX_ELMNT)) != NULL) {
         if (strcmp(xml_name(xerr), "rpc-error") == 0){
             if ((x = xml_find_type(xerr, NULL, "error-severity", CX_ELMNT)) != NULL &&
                 (b = xml_body(x)) != NULL &&

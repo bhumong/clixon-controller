@@ -53,11 +53,16 @@
 /* clixon */
 #include <clixon/clixon.h>
 
+/* These include signatures for plugin and transaction callbacks. */
+#include <clixon/clixon_backend.h>
+
 /* Controller includes */
 #include "controller.h"
+#include "controller_lib.h"
 #include "controller_netconf.h"
 #include "controller_device_state.h"
 #include "controller_device_handle.h"
+#include "controller_transaction.h"
 
 /*
  * Constants
@@ -76,6 +81,9 @@ struct controller_device_handle{
     yang_config_t      cdh_yang_config; /* Yang config (shadow of config) */
     conn_state         cdh_conn_state; /* Connection state */
     struct timeval     cdh_conn_time;  /* Time when entering last connection state */
+    struct timeval     cdh_sync_time;  /* Time when last sync (0 if unsynched) */
+    struct timeval     cdh_stable_time; /* Time when last time entered stable state: open or close - after connect/close,
+                                           skip push/rpc states */
     clixon_handle      cdh_h;          /* Clixon handle */
     clixon_client_type cdh_type;       /* Clixon socket type */
     int                cdh_socket;     /* Input/output socket, -1 is closed */
@@ -89,7 +97,6 @@ struct controller_device_handle{
     netconf_framing_type cdh_framing_type; /* Netconf framing type of device */
     cxobj             *cdh_xcaps;      /* Capabilities as XML tree */
     cxobj             *cdh_yang_lib;   /* RFC 8525 yang-library module list */
-    struct timeval     cdh_sync_time;  /* Time when last sync (0 if unsynched) */
     int                cdh_nr_schemas; /* How many schemas from this device */
     char              *cdh_schema_name; /* Pending schema name */
     char              *cdh_schema_rev;  /* Pending schema revision */
@@ -173,6 +180,7 @@ device_handle_new(clixon_handle h,
     cdh->cdh_socket = -1;
     cdh->cdh_sockerr = -1;
     cdh->cdh_conn_state = CS_CLOSED;
+    cdh->cdh_flags = DH_FLAG_YANG_ANNOUNCE_LATEST; /* Default to announce latest yangs */
     if ((cdh->cdh_name = strdup(name)) == NULL){
         clixon_err(OE_UNIX, errno, "strdup");
         device_handle_free1(cdh);
@@ -560,7 +568,10 @@ device_handle_tid_set(device_handle dh,
                       uint64_t      tid)
 {
     struct controller_device_handle *cdh = devhandle(dh);
+    controller_transaction *ct;
 
+    if ((ct = controller_transaction_find(cdh->cdh_h, tid)) != NULL)
+        controller_transaction_device_add(ct, cdh->cdh_name);
     cdh->cdh_tid = tid;
     return 0;
 }
@@ -630,6 +641,7 @@ device_handle_conn_state_set(device_handle dh,
                              conn_state    state)
 {
     struct controller_device_handle *cdh = devhandle(dh);
+    struct timeval t;
 
     assert(device_state_int2str(state)!=NULL);
     clixon_debug(CLIXON_DBG_CTRL, "%s: %s -> %s",
@@ -643,7 +655,10 @@ device_handle_conn_state_set(device_handle dh,
         cdh->cdh_logmsg = NULL;
     }
     cdh->cdh_conn_state = state;
-    device_handle_conn_time_set(dh, NULL);
+    gettimeofday(&t, NULL);
+    device_handle_conn_time_set(dh, &t);
+    if (state == CS_CLOSED)
+        device_handle_stable_time_set(dh, &t);
     return 0;
 }
 
@@ -677,6 +692,72 @@ device_handle_conn_time_set(device_handle   dh,
         gettimeofday(&cdh->cdh_conn_time, NULL);
     else
         cdh->cdh_conn_time = *t;
+    return 0;
+}
+
+/*! Get sync timestamp
+ *
+ * @param[in]  dh     Device handle
+ * @param[out] t      Sync timestamp (=0 if uninitialized)
+ */
+int
+device_handle_sync_time_get(device_handle    dh,
+                             struct timeval *t)
+{
+    struct controller_device_handle *cdh = devhandle(dh);
+
+    *t = cdh->cdh_sync_time;
+    return 0;
+}
+
+/*! Set sync timestamp
+ *
+ * @param[in]  dh     Device handle
+ * @param[in]  t      Timestamp, if NULL set w gettimeofday
+ */
+int
+device_handle_sync_time_set(device_handle   dh,
+                            struct timeval *t)
+{
+    struct controller_device_handle *cdh = devhandle(dh);
+
+    if (t == NULL)
+        gettimeofday(&cdh->cdh_sync_time, NULL);
+    else
+        cdh->cdh_sync_time = *t;
+    return 0;
+}
+
+/*! Get stable open/close state timestamp
+ *
+ * @param[in]  dh     Device handle
+ * @param[out] t      Stable timestamp (=0 if uninitialized)
+ */
+int
+device_handle_stable_time_get(device_handle    dh,
+                             struct timeval *t)
+{
+    struct controller_device_handle *cdh = devhandle(dh);
+
+    *t = cdh->cdh_stable_time;
+    return 0;
+}
+
+/*! Set stable open/close state timestamp
+ *
+ * @param[in]  dh     Device handle
+ * @param[in]  t      Timestamp, if NULL set w gettimeofday
+ */
+int
+device_handle_stable_time_set(device_handle   dh,
+                            struct timeval *t)
+{
+    struct controller_device_handle *cdh = devhandle(dh);
+
+    if (t == NULL)
+        gettimeofday(&cdh->cdh_stable_time, NULL);
+    else
+        cdh->cdh_stable_time = *t;
     return 0;
 }
 
@@ -824,9 +905,11 @@ device_handle_capabilities_find(clixon_handle dh,
     cxobj                           *x = NULL;
     char                            *b;
     char                            *bi;
+    int                              ix;
 
     xcaps = cdh->cdh_xcaps;
-    while ((x = xml_child_each(xcaps, x, -1)) != NULL) {
+    ix = 0;
+    while ((x = xml_child_iter(xcaps, &ix, -1)) != NULL) {
         b = xml_body(x);
         if ((bi = index(b, '?')) != NULL){
             if (strncmp(name, b, bi-b) == 0)
@@ -895,6 +978,7 @@ device_handle_yang_lib_append(device_handle dh,
     cxobj                           *xms1 = NULL;
     cxobj                           *xm1;
     char                            *name;
+    int                              ix;
 
     /* Sanity check */
     if (xylib){
@@ -910,8 +994,8 @@ device_handle_yang_lib_append(device_handle dh,
                 goto done;
             }
             if (xml_tree_equal(xms0, xms1) != 0) {
-                xm1 = NULL;
-                while ((xm1 = xml_child_each(xms1, xm1, CX_ELMNT)) != NULL) {
+                ix = 0;
+                while ((xm1 = xml_child_iter(xms1, &ix, CX_ELMNT)) != NULL) {
                     if (strcmp(xml_name(xm1), "module") != 0)
                         continue;
                     if ((name = xml_find_body(xm1, "name")) == NULL)
@@ -943,39 +1027,6 @@ device_handle_yang_lib_append(device_handle dh,
     if (xylib)
         xml_free(xylib);
     return retval;
-}
-
-/*! Get sync timestamp
- *
- * @param[in]  dh     Device handle
- * @param[out] t      Sync timestamp (=0 if uninitialized)
- */
-int
-device_handle_sync_time_get(device_handle    dh,
-                             struct timeval *t)
-{
-    struct controller_device_handle *cdh = devhandle(dh);
-
-    *t = cdh->cdh_sync_time;
-    return 0;
-}
-
-/*! Set sync timestamp
- *
- * @param[in]  dh     Device handle
- * @param[in]  t      Timestamp, if NULL set w gettimeofday
- */
-int
-device_handle_sync_time_set(device_handle   dh,
-                            struct timeval *t)
-{
-    struct controller_device_handle *cdh = devhandle(dh);
-
-    if (t == NULL)
-        gettimeofday(&cdh->cdh_sync_time, NULL);
-    else
-        cdh->cdh_sync_time = *t;
-    return 0;
 }
 
 /*! Get nr of schemas
@@ -1188,4 +1239,60 @@ device_handle_outmsg_set(device_handle dh,
         cdh->cdh_outmsg2 = cb;
     }
     return 0;
+}
+
+/*! Return statistics of device handles
+ *
+ * @param[in]   h        Clixon handle
+ * @param[out]  nrp      Number of trasactions
+ * @param[out]  szp      Size of all transactions
+ * @retval      0        OK
+ * @retval     -1        Error
+ * @see xml_stats
+ */
+int
+device_handle_stats(clixon_handle  h,
+                    uint64_t      *nrp,
+                    size_t        *szp)
+{
+    int                              retval = -1;
+    struct controller_device_handle *cdh;
+    struct controller_device_handle *cdh_list = NULL;
+    uint64_t                         nr = 0;
+    size_t                           sz = 0;
+
+    clicon_ptr_get(h, "client-list", (void**)&cdh_list);
+    if ((cdh = cdh_list) != NULL)
+        do {
+            nr++;
+            sz += sizeof(struct controller_device_handle);
+            if (cdh->cdh_name)
+                sz += strlen(cdh->cdh_name)+1;
+            if (cdh->cdh_frame_buf)
+                sz += cbuf_buflen(cdh->cdh_frame_buf);
+            if (cdh->cdh_xcaps)
+                xml_stats(cdh->cdh_xcaps, XML_STATS_ALL, NULL, &sz);
+            if (cdh->cdh_yang_lib)
+                xml_stats(cdh->cdh_yang_lib, XML_STATS_ALL, NULL, &sz);
+            if (cdh->cdh_schema_name)
+                sz += strlen(cdh->cdh_schema_name)+1;
+            if (cdh->cdh_schema_rev)
+                sz += strlen(cdh->cdh_schema_rev)+1;
+            if (cdh->cdh_logmsg)
+                sz += strlen(cdh->cdh_logmsg)+1;
+            if (cdh->cdh_domain)
+                sz += strlen(cdh->cdh_domain)+1;
+            if (cdh->cdh_outmsg1)
+                sz += cbuf_buflen(cdh->cdh_outmsg1);
+            if (cdh->cdh_outmsg2)
+                sz += cbuf_buflen(cdh->cdh_outmsg2);
+            cdh = NEXTQ(struct controller_device_handle *, cdh);
+        } while (cdh && cdh != cdh_list);
+    if (nrp)
+        *nrp += nr;
+    if (szp)
+        *szp += sz;
+    retval = 0;
+    //done:
+    return retval;
 }
