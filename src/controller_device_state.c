@@ -1409,10 +1409,12 @@ device_state_handler(clixon_handle h,
                 break;
             }
         }
-        if (!device_handle_capabilities_find(dh, NETCONF_MONITORING_NAMESPACE)){
-            clixon_debug(CLIXON_DBG_CTRL, "Device %s: Netconf monitoring capability %s not announced in hello protocol",
+        if (!device_handle_capabilities_find(dh, NETCONF_MONITORING_NAMESPACE) ||
+            (device_handle_flag_get(dh, DH_FLAG_SKIP_STATE_SCHEMAS) && xyanglib != NULL)){
+            clixon_debug(CLIXON_DBG_CTRL, "Device %s: Netconf monitoring %s",
                          name,
-                         NETCONF_MONITORING_NAMESPACE);
+                         device_handle_capabilities_find(dh, NETCONF_MONITORING_NAMESPACE) ?
+                         "announced but skipped (netconf-state-schemas=false)" : "not announced");
             if (xyanglib == NULL){
                 if (controller_transaction_failed(h, tid, ct, dh, TR_FAILED_DEV_CLOSE, name,
                                                   "Netconf monitoring capability not announced in hello protocol and no local models found") < 0)

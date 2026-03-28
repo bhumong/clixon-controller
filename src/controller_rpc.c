@@ -267,6 +267,13 @@ controller_connect(clixon_handle           h,
     }
     if (xb && (str = xml_body(xb)) != NULL && strcmp(str, "true") == 0)
         device_handle_flag_set(dh, DH_FLAG_SKIP_CANDIDATE);
+    if ((xb = xml_find_type(xn, NULL, "netconf-state-schemas", CX_ELMNT)) == NULL ||
+        xml_flag(xb, XML_FLAG_DEFAULT)){
+        if (xdevprofile)
+            xb = xml_find_type(xdevprofile, NULL, "netconf-state-schemas", CX_ELMNT);
+    }
+    if (xb && (str = xml_body(xb)) != NULL && strcmp(str, "false") == 0)
+        device_handle_flag_set(dh, DH_FLAG_SKIP_STATE_SCHEMAS);
     if ((xb = xml_find_type(xn, NULL, "netconf-framing", CX_ELMNT)) == NULL ||
         xml_flag(xb, XML_FLAG_DEFAULT)){
         if (xdevprofile)
